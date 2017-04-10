@@ -1,4 +1,15 @@
-﻿module Paket.IntegrationTests.BasicResolverSpecs
+﻿#if INTERACTIVE
+System.IO.Directory.SetCurrentDirectory __SOURCE_DIRECTORY__
+#r "../../packages/test/NUnit/lib/net45/nunit.framework.dll"
+#r "../../packages/build/FAKE/tools/Fakelib.dll"
+#r "../../packages/Chessie/lib/net40/Chessie.dll"
+#r "../../bin/paket.core.dll"
+#load "../../paket-files/test/forki/FsUnit/FsUnit.fs"
+#load "TestHelper.fs"
+open Paket.IntegrationTests.TestHelpers
+#else
+module Paket.IntegrationTests.BasicResolverSpecs
+#endif
 
 open Fake
 open Paket
@@ -17,7 +28,7 @@ let ``#49 windsor should resolve correctly``() =
 
 [<Test>]
 let ``#51 should resolve with pessimistic strategy correctly``() =
-    let lockFile = update "i000051-resolve-with-pessimistic-strategy"
+    let lockFile = update "i000051-resolve-pessimistic"
     lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Castle.Windsor-log4net"].Version
     |> shouldEqual (SemVer.Parse "3.2.0.1")
 
@@ -47,7 +58,7 @@ let ``#108 should resolve jquery case-insensitive``() =
 
 [<Test>]
 let ``#144 should resolve nunit from fsunit``() =
-    let lockFile = update "i000144-resolve-nunit-from-fsunit"
+    let lockFile = update "i000144-resolve-nunit"
     let v = lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "NUnit"].Version
     v |> shouldBeGreaterThan (SemVer.Parse "2.6")
     v |> shouldBeSmallerThan (SemVer.Parse "3")
@@ -70,17 +81,6 @@ let ``#220 should respect the == operator``() =
     lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Microsoft.AspNet.Razor"].Version
     |> shouldEqual (SemVer.Parse "2.0.30506.0")
 
-[<Test>]
-let ``#263 should respect SemVer prereleases``() =
-    let lockFile = update "i000263-semver-prereleases"
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Ninject"].Version
-    |> shouldEqual (SemVer.Parse "3.2.3-unstable-001")    
-
-[<Test>]
-let ``#263 should respect prereleases``() =
-    let lockFile = update "i000263-prereleases"
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Ninject"].Version
-    |> shouldBeGreaterThan (SemVer.Parse "3.2.3-unstable-011")
 
 [<Test>]
 let ``#299 should restore package ending in lib``() =
@@ -136,3 +136,9 @@ let ``#1450 should resolve with twiddle wakka``() =
     let lockFile = update "i001450-twiddle-wakka"
     lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "EnterpriseLibrary.SemanticLogging"].Version
     |> shouldBeSmallerThan (SemVer.Parse "3")
+
+
+#if INTERACTIVE
+;;
+
+#endif

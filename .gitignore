@@ -179,7 +179,6 @@ release.sh
 localpackages/
 paket-files
 *.orig
-.paket/paket.exe
 docs/content/license.md
 docs/content/release-notes.md
 _NCrunch_Paket
@@ -193,3 +192,4 @@ docs/content/paket.exe
 TestResult.xml
 tests/Paket.Tests/NuGetConfig/PasswordConfig.xml
 paket.local
+dotnetcore

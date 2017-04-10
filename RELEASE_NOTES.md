@@ -1,7 +1,125 @@
-#### 3.23.2 - 11.10.2016
-* USABILITY: Specify Chessie version - https://github.com/fsprojects/Paket/issues/1958
+#### 4.3.0 - 10.04.2017
+* BUGFIX: Check if a references file exists on disk - https://github.com/fsprojects/Paket/pull/2224
 
-#### 3.23.1 - 10.10.2016
+#### 4.2.0 - 09.04.2017
+* BUGFIX: Improved output of the outdated warning and fix underlying bug - https://github.com/fsprojects/Paket/pull/2223
+* BUGFIX: Make Paket.Restore.targets be called in more situations
+* BUGFIX: Fix to handle weird malformed portable-only libraries - https://github.com/fsprojects/Paket/pull/2215
+* BUGFIX: Detect changes in redirects settings
+* BUGFIX: Workaround for TFS dependency resolution - https://github.com/fsprojects/Paket/pull/2214
+
+#### 4.1.3 - 30.03.2017
+* Support for dotnet pack
+* BUGFIX: Handle empty references files for .NET Core
+* BUGFIX: Better framework node detection
+* BUGFIX: Better redirects for project dependent references files
+* BUGFIX: Out-of-Sync check should work with auto-detection of framework settings
+* BUGFIX: Convert from nuget with wildcard version - https://github.com/fsprojects/Paket/issues/2185
+* BUGFIX: Support load script generation in restore
+* BUGFIX: framework: auto-detect didn't work with Paket 4 - https://github.com/fsprojects/Paket/issues/2188
+* USABILITY: Convert packages that do not have version specified
+* COSMETICS: Use latest FSharp.Core
+
+#### 4.0.0 - 15.03.2017
+* Make Paket compatible with DotNet SDK / MSBuild 15 / Visual Sudio 2017
+* Tail Recursive Package Resolution - https://github.com/fsprojects/Paket/pull/2066
+* Reorganized resolver - https://github.com/fsprojects/Paket/pull/2039
+* USABILITY: Added option to have paket restore fail on check failure - https://github.com/fsprojects/Paket/pull/1963
+* USABILITY: Collect multiple install errors before failing  - https://github.com/fsprojects/Paket/pull/2177
+* Generate load scripts on install abidding to new paket.dependencies option - https://fsprojects.github.io/Paket/dependencies-file.html#Generate-load-scripts
+
+#### 3.37.0 - 15.03.2017
+* BUGFIX: auto-detect no longer causes Out of sync warning - https://github.com/fsprojects/Paket/issues/2096
+* BUGFIX: Allow to add package when sources are splitted - https://github.com/fsprojects/Paket.VisualStudio/issues/137
+* USABILITY: Remove confusing yellow diagnostics in pack - https://github.com/fsprojects/Paket/issues/2164
+* USABILITY: Support TLS > 1.0 - https://github.com/fsprojects/Paket/issues/2174
+* USABILITY: old bootstrapper did not work
+
+#### 3.36.0 - 25.02.2017
+* BUGFIX: Lower case group folder name - https://github.com/fsprojects/Paket/pull/2150
+* BUGFIX: Fix resolver for Strategy.Min - https://github.com/fsprojects/Paket/issues/2148
+* BUGFIX: Fix TFS-on-premise - https://github.com/fsprojects/Paket/pull/2147
+* BUGFIX: Add a workaround for https://github.com/fsprojects/Paket/issues/2145
+* BUGFIX: Ignore unknown frameworks - https://github.com/fsprojects/Paket/pull/2132
+* COSMETICS: Do not spam "unlisted" - https://github.com/fsprojects/Paket/issues/2149
+* USABILITY: Link to documentation on how to resolve a conflict - https://github.com/fsprojects/Paket/pull/2155
+
+#### 3.35.0 - 30.01.2017
+* Added "netcoreapp1.1" support - https://github.com/fsprojects/Paket/pull/2129
+* BUGFIX: Ensures that boostrapper --help always work - https://github.com/fsprojects/Paket/pull/2128
+* USABILITY: Reports broken project dependencies properly - https://github.com/fsprojects/Paket/pull/2131
+* USABILITY: Added details for "clear-cache" in --verbose mode - https://github.com/fsprojects/Paket/pull/2130
+
+#### 3.34.0 - 29.01.2017
+* BUGFIX: Support GitHub dependencies with spaces - https://github.com/fsprojects/Paket/pull/2127
+* BUGFIX: Convert from nuget: Local package source gave false error - https://github.com/fsprojects/Paket/pull/2112
+* BUGFIX: Make config writer use XmlWriter for disk write - https://github.com/fsprojects/Paket/pull/2110
+* BUGFIX: Ensure case when getting packages from nuget feed - https://github.com/fsprojects/Paket/pull/2106
+* BUGFIX: Ensure stable ordering of references
+
+#### 3.33.0 - 06.01.2017
+* USABILITY: Ensure stable ordering of references in the same ItemGroup - https://github.com/fsprojects/Paket/pull/2105
+* BUGFIX: Template with multiparagraph description was not working with LF line endings - https://github.com/fsprojects/Paket/issues/2104
+
+#### 3.32.0 - 02.01.2017
+* paket outdated: group -parameter added - https://github.com/fsprojects/Paket/pull/2097
+* BUGFIX: Fix "directory doesn't exist" in NuGet v2 - https://github.com/fsprojects/Paket/pull/2102
+* BUGFIX: Correctly escape no_proxy domains for bootstraper - https://github.com/fsprojects/Paket/pull/2100
+* BUGFIX: Don't print incorrect warning in bootstraper - https://github.com/fsprojects/Paket/pull/2098
+* BUGFIX: Update Argu to 3.6.1
+* BUGFIX: Revert argu update
+* BUGFIX: If we have ref and lib files then we prefer lib
+* BUGFIX: Don't remove group with only remote files - https://github.com/fsprojects/Paket/pull/2089
+* BUGFIX: Fix displayed package name for packages found in another group - https://github.com/fsprojects/Paket/pull/2088
+* BUGFIX: Avoid infinite recursive calls in followODataLink - https://github.com/fsprojects/Paket/pull/2081 
+* BUGFIX: One of the file writes was missing a Directory.Create() - https://github.com/fsprojects/Paket/pull/2080
+* BUGFIX: NuGetV2-OData: retrieve versions in descending order for artifactory - https://github.com/fsprojects/Paket/pull/2073
+* BUGFIX: Default address of NuGet v3 stream points to https - https://github.com/fsprojects/Paket/pull/2071
+ 
+#### 3.31.0 - 04.12.2016
+* Added monoandroid70 moniker (Android 7 Nougat) - https://github.com/fsprojects/Paket/pull/2065
+* BUGFIX: Package names are compared using non-linguistic Ordinal comparison - https://github.com/fsprojects/Paket/pull/2067
+* BUGFIX: Fixed Git dependency change detection - https://github.com/fsprojects/Paket/pull/2061
+* BUGFIX: Relax prerelease condition for --keep-patch - https://github.com/fsprojects/Paket/issues/2048
+* BUGFIX: Allow specify auto-detect in specific groups - https://github.com/fsprojects/Paket/issues/2011
+
+#### 3.30.0 - 22.11.2016
+* Allow override of NuGetCacheFolder location through environment variable - https://github.com/fsprojects/Paket/pull/2035
+* BUGFIX: Add authorization headers to Paket Push - https://github.com/fsprojects/Paket/pull/2034
+* BUGFIX: Fix package name displayed when package is found in different group - https://github.com/fsprojects/Paket/issues/2031
+* BUGFIX: Report which nuspec file is invalid when the nuspec cannot be loaded - https://github.com/fsprojects/Paket/issues/2026
+
+#### 3.29.0 - 18.11.2016
+* BUGFIX: Paket adds stricter prerelease dependencies to make NuGet happy - https://github.com/fsprojects/Paket/issues/2024
+
+#### 3.28.0 - 17.11.2016
+* BUGFIX: Optimize deps to make #2020 work - https://github.com/fsprojects/Paket/pull/2020
+* BUGFIX: Added missing tolower() - https://github.com/fsprojects/Paket/pull/2023
+* BUGFIX: Fix broken condition in WhenNode - https://github.com/fsprojects/Paket/pull/2022
+* REVERT: NuGetV2-OData: retrieve versions in descending order - https://github.com/fsprojects/Paket/pull/2008
+* BUGFIX: Git Dependency failed to install when space exists in User Folder name - https://github.com/fsprojects/Paket/pull/2015
+
+#### 3.27.0 - 09.11.2016
+* Verbose bootstrapper - https://github.com/fsprojects/Paket/pull/2007 
+* BUGFIX: NuGetV2-OData: retrieve versions in descending order - https://github.com/fsprojects/Paket/pull/2008
+* BUGFIX: Paket doesn't reference libs for UWP apps - https://github.com/fsprojects/Paket/issues/2001
+* BUGFIX: Version constraint was missing on referenced projects packed separately - https://github.com/fsprojects/Paket/issues/1976
+* BUGFIX: Make download loop to terminate in max N=5 iterations - https://github.com/fsprojects/Paket/pull/1999
+
+#### 3.26.0 - 31.10.2016
+* New Command: paket why - http://theimowski.com/blog/2016/10-30-paket-why-command/index.html
+* BUGFIX: Do not remove main group - https://github.com/fsprojects/Paket/issues/1950
+* BUGFIX: Fix out-of-date-check
+* BUGFIX: Be more conservative during paket add and paket remove - https://github.com/fsprojects/Paket/issues/1652
+
+#### 3.25.0 - 28.10.2016
+* Allow to put required paket version into the paket.dependencies file - https://github.com/fsprojects/Paket/pull/1983
+* BUGFIX: Custom print for NugetSourceAuthentication types - https://github.com/fsprojects/Paket/pull/1985
+* BUGFIX: DependenciesFileParser now tracks inner exceptions for package sources - https://github.com/fsprojects/Paket/pull/1987
+
+#### 3.24.1 - 25.10.2016
+* USABILITY: New magic mode bootstrapper - https://github.com/fsprojects/Paket/pull/1961
+* USABILITY: Specify Chessie version - https://github.com/fsprojects/Paket/issues/1958
 * REVERT: Support long paths for NTFS - https://github.com/fsprojects/Paket/pull/1944
 
 #### 3.23.0 - 10.10.2016

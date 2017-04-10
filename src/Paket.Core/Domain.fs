@@ -1,5 +1,6 @@
 ﻿module Paket.Domain
 
+open System
 open System.IO
 open System.Text.RegularExpressions
 
@@ -27,7 +28,7 @@ type PackageName =
     interface System.IComparable with
        member this.CompareTo that = 
           match that with 
-          | :? PackageName as that -> this.GetCompareString().CompareTo(that.GetCompareString())
+          | :? PackageName as that -> StringComparer.Ordinal.Compare(this.GetCompareString(), that.GetCompareString())
           | _ -> invalidArg "that" "cannot compare value of different types"
 
 /// Function to convert a string into a NuGet package name
@@ -82,19 +83,19 @@ type GroupName =
     interface System.IComparable with
        member this.CompareTo that = 
           match that with 
-          | :? GroupName as that -> this.GetCompareString().CompareTo(that.GetCompareString())
+          | :? GroupName as that -> StringComparer.Ordinal.Compare(this.GetCompareString(), that.GetCompareString())
           | _ -> invalidArg "that" "cannot compare value of different types"
 
 /// Function to convert a string into a group name
 let GroupName(name:string) = 
-  match name.ToLowerInvariant().Trim() with
+    match name.ToLowerInvariant().Trim() with
     | "lib" | "runtimes" -> invalidArg "name" (sprintf "It is not allowed to use '%s' as group name." name)
     | id -> GroupName.GroupName(name.Trim(), id)
 
 type DomainMessage = 
     | DirectoryDoesntExist of DirectoryInfo
     | DependenciesFileNotFoundInDir of DirectoryInfo
-    | DependenciesFileParseError of FileInfo
+    | DependenciesFileParseError of FileInfo * exn
     | LockFileNotFound of DirectoryInfo
     | LockFileParseError of FileInfo
     | ReferencesFileParseError of FileInfo
@@ -127,8 +128,8 @@ type DomainMessage =
             sprintf "Directory %s does not exist." di.FullName
         | DependenciesFileNotFoundInDir(di) -> 
             sprintf "Dependencies file not found in %s." di.FullName
-        | DependenciesFileParseError(fi) -> 
-            sprintf "Unable to parse %s." fi.FullName
+        | DependenciesFileParseError(fi,e) -> 
+            sprintf "Unable to parse %s. (%s)" fi.FullName e.Message
         | LockFileNotFound(di) -> 
             sprintf "Lock file not found in %s. Create lock file by running paket install." di.FullName
         | LockFileParseError(fi) -> 
@@ -167,7 +168,7 @@ type DomainMessage =
         | FileSaveError path ->
             sprintf "Unable to save file %s." path
 
-        | ConfigFileParseError -> "Unable to parse Paket configuration from packages.config."
+        | ConfigFileParseError -> "Unable to parse Paket configuration from paket.config."
 
         | PackagingConfigParseError(file,error) ->
             sprintf "Unable to parse template file %s: %s." file error

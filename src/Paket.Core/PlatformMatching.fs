@@ -7,7 +7,7 @@ let MaxPenalty = 1000000
 
 let inline split (path : string) = 
     path.Split('+')
-    |> Array.map (fun s -> s.Replace("portable-", ""))
+    |> Array.map (fun s -> System.Text.RegularExpressions.Regex.Replace(s, "portable\\d*-",""))
     
 let extractPlatforms = memoize (fun path  -> split path |> Array.choose FrameworkDetection.Extract |> Array.toList)
 
@@ -107,7 +107,7 @@ let platformsSupport =
 
 
 let findBestMatch = 
-    let rec findBestMatch (paths : string list,targetProfile : TargetProfile) = 
+    let rec findBestMatch (paths : string list, targetProfile : TargetProfile) = 
         let requiredPlatforms = 
             match targetProfile with
             | PortableProfile(_, platforms) -> platforms
@@ -140,7 +140,7 @@ let findBestMatch =
                         None
                 | _ -> None)
             |> List.distinct
-            |> List.sortBy (fun (x, pen) -> pen, (extractPlatforms x).Length) // prefer portable platform whith less platforms
+            |> List.sortBy (fun (x, pen) -> pen, (extractPlatforms x).Length) // prefer portable platform with less platforms
             |> List.map fst
             |> List.tryHead
         | path -> path
@@ -181,6 +181,7 @@ let getTargetCondition (target:TargetProfile) =
         | MonoTouch -> "$(TargetFrameworkIdentifier) == 'MonoTouch'", ""
         | MonoMac -> "$(TargetFrameworkIdentifier) == 'MonoMac'", ""
         | XamariniOS -> "$(TargetFrameworkIdentifier) == 'Xamarin.iOS'", ""
+        | UAP(version) ->"$(TargetPlatformIdentifier) == 'UAP'", sprintf "$(TargetPlatformVersion.StartsWith('%O'))" version
         | XamarinMac -> "$(TargetFrameworkIdentifier) == 'Xamarin.Mac'", ""
         | Native("","") -> "true", ""
         | Native("",bits) -> (sprintf "'$(Platform)'=='%s'" bits), ""

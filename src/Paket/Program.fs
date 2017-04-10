@@ -3,15 +3,14 @@ module Paket.Program
 
 open System
 open System.Diagnostics
-open System.Reflection
 open System.IO
 
 open Paket.Logging
 open Paket.Commands
-open Paket.Releases
 
 open Argu
 open PackageSources
+open System.Xml
 
 let private stopWatch = new Stopwatch()
 stopWatch.Start()
@@ -29,7 +28,11 @@ let processWithValidation silent validateF commandF (result : ParseResults<'T>) 
         traceError "Command was:"
         traceError ("  " + String.Join(" ",Environment.GetCommandLineArgs()))
         result.Parser.PrintUsage() |> traceError
+#if NETCOREAPP1_0
+        // Environment.ExitCode not supported in netcoreapp1.0
+#else
         Environment.ExitCode <- 1
+#endif
     else
         commandF result
         let elapsedTime = Utils.TimeSpanToReadableString stopWatch.Elapsed
@@ -94,12 +97,12 @@ let autoRestore (results : ParseResults<_>) =
     | On -> Dependencies.Locate().TurnOnAutoRestore()
     | Off -> Dependencies.Locate().TurnOffAutoRestore()
 
-let convert (results : ParseResults<_>) =
+let convert (fromBootstrapper:bool) (results : ParseResults<_>) =
     let force = results.Contains <@ ConvertFromNugetArgs.Force @>
     let noInstall = results.Contains <@ ConvertFromNugetArgs.No_Install @>
     let noAutoRestore = results.Contains <@ ConvertFromNugetArgs.No_Auto_Restore @>
     let credsMigrationMode = results.TryGetResult <@ ConvertFromNugetArgs.Creds_Migration @>
-    Dependencies.ConvertFromNuget(force, noInstall |> not, noAutoRestore |> not, credsMigrationMode)
+    Dependencies.ConvertFromNuget(force, noInstall |> not, noAutoRestore |> not, credsMigrationMode, fromBootstrapper=fromBootstrapper)
 
 let findRefs (results : ParseResults<_>) =
     let packages = results.GetResult <@ FindRefsArgs.Packages @>
@@ -107,9 +110,8 @@ let findRefs (results : ParseResults<_>) =
     packages |> List.map (fun p -> group,p)
     |> Dependencies.Locate().ShowReferencesFor
 
-let init (results : ParseResults<InitArgs>) =
-    Dependencies.Init()
-    Dependencies.Locate().DownloadLatestBootstrapper()
+let init (fromBootstrapper:bool) (results : ParseResults<InitArgs>) =
+    Dependencies.Init(Directory.GetCurrentDirectory(),fromBootstrapper)
 
 let clearCache (results : ParseResults<ClearCacheArgs>) =
     Dependencies.ClearCache()
@@ -120,6 +122,10 @@ let install (results : ParseResults<_>) =
     let createNewBindingFiles = results.Contains <@ InstallArgs.CreateNewBindingFiles @>
     let cleanBindingRedirects = results.Contains <@ InstallArgs.Clean_Redirects @>
     let installOnlyReferenced = results.Contains <@ InstallArgs.Install_Only_Referenced @>
+    let generateLoadScripts = results.Contains <@ InstallArgs.Generate_Load_Scripts @>
+    let alternativeProjectRoot = results.TryGetResult <@ InstallArgs.Project_Root @>
+    let providedFrameworks = results.GetResults <@ InstallArgs.Load_Script_Framework @>
+    let providedScriptTypes = results.GetResults <@ InstallArgs.Load_Script_Type @>
     let semVerUpdateMode =
         if results.Contains <@ InstallArgs.Keep_Patch @> then SemVerUpdateMode.KeepPatch else
         if results.Contains <@ InstallArgs.Keep_Minor @> then SemVerUpdateMode.KeepMinor else
@@ -127,12 +133,24 @@ let install (results : ParseResults<_>) =
         SemVerUpdateMode.NoRestriction
     let touchAffectedRefs = results.Contains <@ InstallArgs.Touch_Affected_Refs @>
 
-    Dependencies.Locate().Install(force, withBindingRedirects, cleanBindingRedirects, createNewBindingFiles, installOnlyReferenced, semVerUpdateMode, touchAffectedRefs)
+    Dependencies.Locate().Install(
+        force, 
+        withBindingRedirects, 
+        cleanBindingRedirects, 
+        createNewBindingFiles, 
+        installOnlyReferenced, 
+        semVerUpdateMode, 
+        touchAffectedRefs, 
+        generateLoadScripts, 
+        providedFrameworks, 
+        providedScriptTypes,
+        alternativeProjectRoot)
 
 let outdated (results : ParseResults<_>) =
     let strict = results.Contains <@ OutdatedArgs.Ignore_Constraints @> |> not
     let includePrereleases = results.Contains <@ OutdatedArgs.Include_Prereleases @>
-    Dependencies.Locate().ShowOutdated(strict, includePrereleases)
+    let group = results.TryGetResult <@ OutdatedArgs.Group @>
+    Dependencies.Locate().ShowOutdated(strict, includePrereleases, group)
 
 let remove (results : ParseResults<_>) =
     let packageName = results.GetResult <@ RemoveArgs.Nuget @>
@@ -150,12 +168,21 @@ let remove (results : ParseResults<_>) =
 let restore (results : ParseResults<_>) =
     let force = results.Contains <@ RestoreArgs.Force @>
     let files = results.GetResult (<@ RestoreArgs.References_Files @>, defaultValue = [])
+    let project = results.TryGetResult (<@ RestoreArgs.Project @>)
     let group = results.TryGetResult <@ RestoreArgs.Group @>
     let installOnlyReferenced = results.Contains <@ RestoreArgs.Install_Only_Referenced @>
     let touchAffectedRefs = results.Contains <@ RestoreArgs.Touch_Affected_Refs @>
     let ignoreChecks = results.Contains <@ RestoreArgs.Ignore_Checks @>
-    if List.isEmpty files then Dependencies.Locate().Restore(force, group, installOnlyReferenced, touchAffectedRefs, ignoreChecks)
-    else Dependencies.Locate().Restore(force, group, files, touchAffectedRefs, ignoreChecks)
+    let failOnChecks = results.Contains <@ RestoreArgs.Fail_On_Checks @>
+    
+    match project with
+    | Some project ->
+        Dependencies.Locate().Restore(force, group, project, touchAffectedRefs, ignoreChecks, failOnChecks)
+    | None ->
+        if List.isEmpty files then 
+            Dependencies.Locate().Restore(force, group, installOnlyReferenced, touchAffectedRefs, ignoreChecks, failOnChecks)
+        else 
+            Dependencies.Locate().Restore(force, group, files, touchAffectedRefs, ignoreChecks, failOnChecks)
 
 let simplify (results : ParseResults<_>) =
     let interactive = results.Contains <@ SimplifyArgs.Interactive @>
@@ -201,7 +228,7 @@ let pack (results : ParseResults<_>) =
                       ?releaseNotes = results.TryGetResult <@ PackArgs.ReleaseNotes @>,
                       ?templateFile = results.TryGetResult <@ PackArgs.TemplateFile @>,
                       excludedTemplates = results.GetResults <@ PackArgs.ExcludedTemplate @>,
-                      workingDir = Environment.CurrentDirectory,
+                      workingDir = System.IO.Directory.GetCurrentDirectory(),
                       lockDependencies = results.Contains <@ PackArgs.LockDependencies @>,
                       minimumFromLockFile = results.Contains <@ PackArgs.LockDependenciesToMinimum @>,
                       pinProjectReferences = results.Contains <@ PackArgs.PinProjectReferences @>,
@@ -231,6 +258,70 @@ let findPackages silent (results : ParseResults<_>) =
             searchAndPrint !searchText
 
     | Some searchText -> searchAndPrint searchText
+
+let fixNuspec silent (results : ParseResults<_>) =
+    match results.TryGetResult <@ FixNuspecArgs.File @> with
+    | None ->
+        failwithf "Please specify the nuspec file with the 'file' parameter."
+
+    | Some nuspecFileName -> 
+        if not (File.Exists nuspecFileName) then
+            failwithf "Specified file '%s' does not exist." nuspecFileName
+        
+        let nuspecText = File.ReadAllText nuspecFileName
+
+        let doc = 
+            try
+                let doc = Xml.XmlDocument()
+                doc.LoadXml nuspecText
+                doc
+            with
+            | exn -> failwithf "Could not parse nuspec file '%s'.%sMessage: %s" nuspecFileName Environment.NewLine exn.Message
+        
+        match results.TryGetResult <@ FixNuspecArgs.ReferencesFile @> with
+        | None ->
+            failwithf "Please specify the references-file with the 'references-file' parameter."
+
+        | Some referencesFileName -> 
+            if not (File.Exists referencesFileName) then
+                failwithf "Specified references-file '%s' does not exist." referencesFileName
+
+            let referencesText = File.ReadAllLines referencesFileName
+            let transitiveReferences = 
+                referencesText 
+                |> Array.map (fun l -> l.Split [|','|])
+                |> Array.choose (fun x -> 
+                    if x.[2] = "Transitive" then
+                        Some x.[0]
+                    else
+                        None)
+                |> Set.ofArray
+            
+            let rec traverse (parent:XmlNode) =
+                let nodesToRemove = System.Collections.Generic.List<_>()
+                for node in parent.ChildNodes do
+                    if node.Name = "dependency" then
+                        let packageName = 
+                            match node.Attributes.["id"] with
+                            | null -> ""
+                            | x -> x.InnerText
+
+                        if transitiveReferences.Contains packageName then
+                            nodesToRemove.Add node |> ignore
+                
+                if nodesToRemove.Count = 0 then
+                    for node in parent.ChildNodes do
+                        traverse node
+                else
+                    for node in nodesToRemove do
+                        parent.RemoveChild node |> ignore
+            
+            traverse doc
+
+            use fileStream = File.Open(nuspecFileName, FileMode.Create)
+
+            doc.Save(fileStream)
+
 
 // separated out from showInstalledPackages to allow Paket.PowerShell to get the types
 let getInstalledPackages (results : ParseResults<_>) =
@@ -279,87 +370,34 @@ let push (results : ParseResults<_>) =
                       ?endPoint = results.TryGetResult <@ PushArgs.EndPoint @>,
                       ?apiKey = results.TryGetResult <@ PushArgs.ApiKey @>)
 
-let generateIncludeScripts (results : ParseResults<GenerateIncludeScriptsArgs>) =
+let generateLoadScripts (results : ParseResults<GenerateLoadScriptsArgs>) =
 
-    let providedFrameworks = results.GetResults <@ GenerateIncludeScriptsArgs.Framework @>
-    let providedScriptTypes = results.GetResults <@ GenerateIncludeScriptsArgs.ScriptType @>
+    let providedFrameworks = results.GetResults <@ GenerateLoadScriptsArgs.Framework @>
+    let providedScriptTypes = results.GetResults <@ GenerateLoadScriptsArgs.ScriptType @>
+    LoadingScripts.ScriptGeneration.executeCommand [] (DirectoryInfo (Directory.GetCurrentDirectory())) providedFrameworks providedScriptTypes
 
-    let dependencies =
-        Dependencies.Locate()
-        |> fun d -> DependenciesFile.ReadFromFile(d.DependenciesFile)
-        |> Paket.UpdateProcess.detectProjectFrameworksForDependenciesFile
+let why (results: ParseResults<WhyArgs>) =
+    let packageName = results.GetResult <@ WhyArgs.NuGet @> |> Domain.PackageName
+    let groupName = 
+        defaultArg 
+            (results.TryGetResult <@ WhyArgs.Group @> |> Option.map Domain.GroupName) 
+            Constants.MainDependencyGroup
+    let dependencies = Dependencies.Locate()
+    let lockFile = dependencies.GetLockFile()
+    let directDeps = 
+        dependencies
+            .GetDependenciesFile()
+            .GetDependenciesInGroup(groupName)
+            |> Seq.map (fun pair -> pair.Key)
+            |> Set.ofSeq
+    let options = 
+        { Why.WhyOptions.Details = results.Contains <@ WhyArgs.Details @> }
 
-    let rootFolder = DirectoryInfo(dependencies.RootPath)
-
-    let frameworksForDependencyGroups = lazy (
-        dependencies.Groups
-            |> Seq.map (fun f -> f.Value.Options.Settings.FrameworkRestrictions)
-            |> Seq.map(function
-                | Paket.Requirements.AutoDetectFramework -> failwithf "couldn't detect framework"
-                | Paket.Requirements.FrameworkRestrictionList list ->
-                  list |> Seq.collect (
-                    function
-                    | Paket.Requirements.FrameworkRestriction.Exactly framework
-                    | Paket.Requirements.FrameworkRestriction.AtLeast framework -> Seq.singleton framework
-                    | Paket.Requirements.FrameworkRestriction.Between (bottom,top) -> [bottom; top] |> Seq.ofList //TODO: do we need to cap the list of generated frameworks based on this? also see todo in Requirements.fs for potential generation of range for 'between'
-                    | Paket.Requirements.FrameworkRestriction.Portable portable -> failwithf "unhandled portable framework %s" portable
-                  )
-              )
-            |> Seq.concat
-    )
-
-    let environmentFramework = lazy (
-        // HACK: resolve .net version based on environment
-        // list of match is incomplete / inaccurate
-        let version = Environment.Version
-        match version.Major, version.Minor, version.Build, version.Revision with
-        | 4, 0, 30319, 42000 -> DotNetFramework (FrameworkVersion.V4_6)
-        | 4, 0, 30319, _ -> DotNetFramework (FrameworkVersion.V4_5)
-        | _ -> DotNetFramework (FrameworkVersion.V4_5) // paket.exe is compiled for framework 4.5
-    )
-    let tupleMap f v = (v, f v)
-    let failOnMismatch toParse parsed f message =
-        if List.length toParse <> List.length parsed then
-            toParse
-            |> Seq.map (tupleMap f)
-            |> Seq.filter (snd >> Option.isNone)
-            |> Seq.map fst
-            |> String.concat ", "
-            |> sprintf "%s: %s. Cannot generate include scripts." message
-            |> failwith
-
-    let frameworksToGenerate =
-        let targetFrameworkList = providedFrameworks |> List.choose FrameworkDetection.Extract
-
-        failOnMismatch providedFrameworks targetFrameworkList FrameworkDetection.Extract "Unrecognized Framework(s)"
-
-        if targetFrameworkList |> Seq.isEmpty |> not then targetFrameworkList |> Seq.ofList
-        else if frameworksForDependencyGroups.Value |> Seq.isEmpty |> not then frameworksForDependencyGroups.Value
-        else Seq.singleton environmentFramework.Value
-
-    let scriptTypesToGenerate =
-      let parsedScriptTypes = providedScriptTypes |> List.choose Paket.LoadingScripts.ScriptGeneration.ScriptType.TryCreate
-
-      failOnMismatch providedScriptTypes parsedScriptTypes Paket.LoadingScripts.ScriptGeneration.ScriptType.TryCreate "Unrecognized Script Type(s)"
-
-      match parsedScriptTypes with
-      | [] -> [Paket.LoadingScripts.ScriptGeneration.CSharp; Paket.LoadingScripts.ScriptGeneration.FSharp]
-      | xs -> xs
-
-    let workaround() = null |> ignore
-    for framework in frameworksToGenerate do
-        tracefn "generating scripts for framework %s" (framework.ToString())
-        workaround() // https://github.com/Microsoft/visualfsharp/issues/759#issuecomment-162243299
-        for scriptType in scriptTypesToGenerate do
-            Paket.LoadingScripts.ScriptGeneration.generateScriptsForRootFolder scriptType framework rootFolder
-
+    Why.ohWhy(packageName, directDeps, lockFile, groupName, results.Parser.PrintUsage(), options)
 
 let main() =
     use consoleTrace = Logging.event.Publish |> Observable.subscribe Logging.traceToConsole
-    let paketVersion =
-        let assembly = Assembly.GetExecutingAssembly()
-        let fvi = FileVersionInfo.GetVersionInfo(assembly.Location)
-        fvi.FileVersion
+    let paketVersion = AssemblyVersionInformation.AssemblyInformationalVersion
 
     try
         let parser = ArgumentParser.Create<Command>(programName = "paket",
@@ -374,8 +412,10 @@ let main() =
         if results.Contains <@ Verbose @> then
             Logging.verbose <- true
 
+        let fromBootstrapper = results.Contains <@ From_Bootstrapper @>
+
         let version = results.Contains <@ Version @> 
-        if not version then            
+        if not version then
 
             use fileTrace =
                 match results.TryGetResult <@ Log_File @> with
@@ -386,9 +426,9 @@ let main() =
             | Add r -> processCommand silent add r
             | ClearCache r -> processCommand silent clearCache r
             | Config r -> processWithValidation silent validateConfig config r
-            | ConvertFromNuget r -> processCommand silent convert r
+            | ConvertFromNuget r -> processCommand silent (convert fromBootstrapper) r
             | FindRefs r -> processCommand silent findRefs r
-            | Init r -> processCommand silent init r
+            | Init r -> processCommand silent (init fromBootstrapper) r
             | AutoRestore r -> processWithValidation silent validateAutoRestore autoRestore r
             | Install r -> processCommand silent install r
             | Outdated r -> processCommand silent outdated r
@@ -398,21 +438,29 @@ let main() =
             | Update r -> processCommand silent update r
             | FindPackages r -> processCommand silent (findPackages silent) r
             | FindPackageVersions r -> processCommand silent findPackageVersions r
+            | FixNuspec r -> processCommand silent (fixNuspec silent) r
             | ShowInstalledPackages r -> processCommand silent showInstalledPackages r
             | ShowGroups r -> processCommand silent showGroups r
             | Pack r -> processCommand silent pack r
             | Push r -> processCommand silent push r
-            | GenerateIncludeScripts r -> processCommand silent generateIncludeScripts r            
+            | GenerateIncludeScripts r -> traceWarn "please use generate-load-scripts" ; processCommand silent generateLoadScripts r
+            | GenerateLoadScripts r -> processCommand silent generateLoadScripts r
+            | Why r -> processCommand silent why r
             // global options; list here in order to maintain compiler warnings
             // in case of new subcommands added
             | Verbose
             | Silent
+            | From_Bootstrapper
             | Version
-            | Log_File _ -> failwith "internal error: this code should never be reached."
+            | Log_File _ -> failwithf "internal error: this code should never be reached."
 
     with
     | exn when not (exn :? System.NullReferenceException) ->
+#if NETCOREAPP1_0    
+        // Environment.ExitCode not supported
+#else
         Environment.ExitCode <- 1
+#endif
         traceErrorfn "Paket failed with:%s\t%s" Environment.NewLine exn.Message
 
         if verbose then

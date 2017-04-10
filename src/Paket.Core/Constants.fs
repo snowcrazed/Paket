@@ -7,7 +7,9 @@ open Paket.Domain
 
 let [<Literal>] GitHubUrl                 = "https://github.com"
 let [<Literal>] DefaultNuGetStream        = "https://www.nuget.org/api/v2"
-let [<Literal>] DefaultNuGetV3Stream      = "http://api.nuget.org/v3/index.json"
+let [<Literal>] DefaultNuGetV3Stream      = "https://api.nuget.org/v3/index.json"
+let [<Literal>] DotnetCoreStream          = "https://dotnet.myget.org/F/dotnet-core/api/v3/index.json"
+let [<Literal>] CliDepsStream             = "https://dotnet.myget.org/F/cli-deps/api/v3/index.json"
 let [<Literal>] GitHubReleasesUrl         = "https://api.github.com/repos/fsprojects/Paket/releases"
 let [<Literal>] GithubReleaseDownloadUrl  = "https://github.com/fsprojects/Paket/releases/download"
 let [<Literal>] LockFileName              = "paket.lock"
@@ -28,6 +30,7 @@ let [<Literal>] PackagesConfigFile        = "packages.config"
 let [<Literal>] NuGetConfigFile           = "NuGet.Config"
 let [<Literal>] FullProjectSourceFileName = "FULLPROJECT"
 let [<Literal>] ProjectDefaultNameSpace   = "http://schemas.microsoft.com/developer/msbuild/2003"
+let [<Literal>] ProjectDefaultNameSpaceCore  = "http://schemas.microsoft.com/developer/msbuild/2003"
 
 #if DOTNETCORE
 module internal Environment =
@@ -92,15 +95,23 @@ let MagicUnlistingDate = DateTimeOffset(1900, 1, 1, 0, 0, 0, TimeSpan.FromHours(
 
 /// The NuGet cache folder.
 let NuGetCacheFolder =
-    match Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) 
+    match Environment.GetEnvironmentVariable("NuGetCachePath")
           |> toOption with
-    | Some appData ->
-      let di = DirectoryInfo(Path.Combine(Path.Combine(appData, "NuGet"), "Cache"))
-      if not di.Exists then
-          di.Create()
-      di.FullName
+    | Some cachePath ->
+        let di = DirectoryInfo(cachePath)
+        if not di.Exists then
+            di.Create()
+        di.FullName
     | None ->
-      let fallback = Path.GetFullPath (".paket")
-      Logging.traceWarnfn "Could not find LocalApplicationData folder, try to set the 'LocalAppData' environment variable. Using '%s' instead" fallback
-      fallback
+        match Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) 
+              |> toOption with
+        | Some appData ->
+          let di = DirectoryInfo(Path.Combine(Path.Combine(appData, "NuGet"), "Cache"))
+          if not di.Exists then
+              di.Create()
+          di.FullName
+        | None ->
+          let fallback = Path.GetFullPath (".paket")
+          Logging.traceWarnfn "Could not find LocalApplicationData folder, try to set the 'LocalAppData' environment variable. Using '%s' instead" fallback
+          fallback
       

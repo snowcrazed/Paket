@@ -4,6 +4,7 @@ open System
 open Paket
 open Paket.Domain
 open Paket.PackageSources
+open Paket.Logging
 
 [<RequireQualifiedAccess>]
 type FrameworkRestriction = 
@@ -19,7 +20,7 @@ type FrameworkRestriction =
         | FrameworkRestriction.AtLeast r -> ">= " + r.ToString()
         | FrameworkRestriction.Between(min,max) -> sprintf ">= %O < %O" min max
 
-    member private x.GetOneIdentifier =
+    member x.GetOneIdentifier =
         match x with
         | Exactly r -> Some r
         | Portable _ -> None
@@ -41,7 +42,16 @@ let getRestrictionList (frameworkRestrictions:FrameworkRestrictions) =
     | FrameworkRestrictionList list -> list
     | AutoDetectFramework -> failwith "The framework restriction could not be determined."
 
-let parseRestrictions(text:string) =
+let parseRestrictions failImmediatly (text:string) =
+    let handleError =
+        if failImmediatly then
+            failwith
+        else
+            if verbose then
+                (fun s ->
+                    traceError s
+                    traceVerbose Environment.StackTrace)
+            else traceError
     let text =
         // workaround missing spaces
         text.Replace("<=","<= ").Replace(">=",">= ").Replace("=","= ")
@@ -60,13 +70,17 @@ let parseRestrictions(text:string) =
         | None -> 
                 if PlatformMatching.extractPlatforms framework |> List.isEmpty |> not then
                     yield FrameworkRestriction.Portable framework
+                else
+                    handleError <| sprintf "Could not parse framework '%s'. Try to update or install again or report a paket bug." framework
         | Some x -> 
             if operatorSplit.[0] = ">=" then
                 if operatorSplit.Length < 4 then
                     yield FrameworkRestriction.AtLeast x
                 else
-                    match FrameworkDetection.Extract(operatorSplit.[3]) with
-                    | None -> ()
+                    let item = operatorSplit.[3]
+                    match FrameworkDetection.Extract(item) with
+                    | None ->
+                        handleError <| sprintf "Could not parse second framework of between operator '%s'. Try to update or install again or report a paket bug." item
                     | Some y -> yield FrameworkRestriction.Between(x,y)
             else
                 yield FrameworkRestriction.Exactly x]
@@ -113,7 +127,7 @@ let rec optimizeRestrictions restrictions =
     | [] -> []
     | [x] -> [x]
     | odered ->
-        let newRestrictions' =
+        let newRestrictions =
             match odered |> Seq.tryFind (function | FrameworkRestriction.AtLeast r -> true | _ -> false) with
             | Some((FrameworkRestriction.AtLeast(DotNetFramework(v)) as r)) ->
                 odered
@@ -131,9 +145,9 @@ let rec optimizeRestrictions restrictions =
                     | _ -> true)
             | _ -> odered
 
-        let newRestrictions =
-            match newRestrictions' |> Seq.rev |> Seq.tryFind (function | FrameworkRestriction.AtLeast r -> true | _ -> false) with
-            | None -> newRestrictions'
+        let filtered =
+            match newRestrictions |> Seq.rev |> Seq.tryFind (function | FrameworkRestriction.AtLeast r -> true | _ -> false) with
+            | None -> newRestrictions
             | Some r ->
                 let currentVersion =
                     match r with
@@ -141,7 +155,7 @@ let rec optimizeRestrictions restrictions =
                     | FrameworkRestriction.AtLeast(DotNetStandard(x)) -> DotNetStandard x
                     | x -> failwithf "Unknown .NET moniker %O" x
                                                                                                            
-                let isLowerVersion (currentVersion:FrameworkIdentifier) x =
+                let isLowerVersion (currentVersion:FrameworkIdentifier) compareVersion =
                     let isMatching (x:FrameworkIdentifier) =
                         if x = DotNetFramework FrameworkVersion.V3_5 && currentVersion = DotNetFramework FrameworkVersion.V4 then true else
                         if x = DotNetFramework FrameworkVersion.V3_5 && currentVersion = DotNetFramework FrameworkVersion.V4_Client then true else
@@ -155,15 +169,23 @@ let rec optimizeRestrictions restrictions =
 
                         not hasFrameworksBetween && not hasStandardsBetween
 
-                    match x with
+                    match compareVersion with
                     | FrameworkRestriction.Exactly(DotNetFramework(x)) -> isMatching (DotNetFramework x)
                     | FrameworkRestriction.Exactly(DotNetStandard(x)) -> isMatching (DotNetStandard x)
-                    | FrameworkRestriction.AtLeast(DotNetFramework(x)) -> isMatching (DotNetFramework x)
-                    | FrameworkRestriction.AtLeast(DotNetStandard(x)) -> isMatching (DotNetStandard x)
+                    | FrameworkRestriction.AtLeast(DotNetFramework(x)) -> 
+                        isMatching (DotNetFramework x) || 
+                            (match currentVersion with
+                             | DotNetFramework(y) when x < y -> true
+                             | _ -> false)
+                    | FrameworkRestriction.AtLeast(DotNetStandard(x)) -> 
+                        isMatching (DotNetStandard x) ||
+                            (match currentVersion with
+                             | DotNetStandard(y) when x < y -> true
+                             | _ -> false)
                     | _ -> false
 
-                match newRestrictions' |> Seq.tryFind (isLowerVersion currentVersion) with
-                | None -> newRestrictions'
+                match newRestrictions |> Seq.tryFind (isLowerVersion currentVersion) with
+                | None -> newRestrictions
                 | Some n -> 
                     let newLowest =
                         match n with
@@ -174,12 +196,12 @@ let rec optimizeRestrictions restrictions =
                         | x -> failwithf "Unknown .NET moniker %O" x
 
                     let filtered =
-                        newRestrictions'
+                        newRestrictions
                         |> List.filter (fun x -> x <> r && x <> n)
 
                     filtered @ [FrameworkRestriction.AtLeast(newLowest)]
                                         
-        if restrictions = newRestrictions then sorting newRestrictions else optimizeRestrictions newRestrictions
+        if restrictions = filtered then sorting filtered else optimizeRestrictions filtered
 
 let hasDotNetFrameworkOrAnyCase =
     List.exists (fun (_,_,rs) ->
@@ -425,27 +447,56 @@ let private combineSameCategoryOrPortableRestrictions x y =
             if min' = max' then [FrameworkRestriction.Exactly(min')] else
             []
 
-let combineRestrictions (x : FrameworkRestriction) y =
-    if (x.IsSameCategoryAs(y) = Some(false)) then
-        []
-    else
+let combineRestrictions loose (x : FrameworkRestriction) y =
+    if x.IsSameCategoryAs(y) <> Some false then
         combineSameCategoryOrPortableRestrictions x y
+    else
+        if loose then
+             match (x.GetOneIdentifier, y.GetOneIdentifier) with
+             | Some (FrameworkIdentifier.DotNetFramework _ ), Some (FrameworkIdentifier.DotNetStandard _ ) -> [x]
+             | Some (FrameworkIdentifier.DotNetStandard _ ), Some (FrameworkIdentifier.DotNetFramework _ ) -> [y]
+             | _ -> []
+        else
+            []
 
 let filterRestrictions (list1:FrameworkRestrictions) (list2:FrameworkRestrictions) =
-    let list1 = getRestrictionList list1
-    let list2 = getRestrictionList list2
+    match list1,list2 with 
+    | FrameworkRestrictionList [], AutoDetectFramework -> AutoDetectFramework
+    | AutoDetectFramework, FrameworkRestrictionList [] -> AutoDetectFramework
+    | AutoDetectFramework, AutoDetectFramework -> AutoDetectFramework
+    | FrameworkRestrictionList list1 , FrameworkRestrictionList list2 ->
+        let filtered =
+            match list1, list2 with
+            | [],_ -> list2
+            | _,[] -> list1
+            | _ ->
+                [for x in list1 do
+                    for y in list2 do
+                        let c = combineRestrictions false x y
+                        if c <> [] then yield! c]
 
-    let optimized =
-        match list1, list2 with
-        | [],_ -> list2
-        | _,[] -> list1
-        | _ ->
-            [for x in list1 do
-                for y in list2 do
-                    let c = combineRestrictions x y
-                    if c <> [] then yield! c]
-        |> optimizeRestrictions
-    FrameworkRestrictionList optimized
+        let tryLoose = 
+            (filtered |> List.exists (fun r -> match r.GetOneIdentifier with | Some (FrameworkIdentifier.DotNetFramework _ ) -> true | _ -> false) |> not) &&
+                (list2 |> List.exists (fun r -> match r.GetOneIdentifier with | Some (FrameworkIdentifier.DotNetFramework _ ) -> true | _ -> false))
+
+        let filtered = 
+            if tryLoose then
+                match list1, list2 with
+                | [],_ -> list2
+                | _,[] -> list1
+                | _ ->
+                    [for x in list1 do
+                        for y in list2 do
+                            let c = combineRestrictions true x y
+                            if c <> [] then yield! c]
+            else
+                filtered
+
+        let optimized =
+            filtered
+            |> optimizeRestrictions
+        FrameworkRestrictionList optimized
+    | _ -> failwithf "The framework restriction %O and %O could not be combined." list1 list2
 
 /// Get if a target should be considered with the specified restrictions
 let isTargetMatchingRestrictions =
@@ -514,7 +565,8 @@ type InstallSettings =
       CopyLocal : bool option
       Excludes : string list
       Aliases : Map<string,string>
-      CopyContentToOutputDirectory : CopyToOutputDirectorySettings option }
+      CopyContentToOutputDirectory : CopyToOutputDirectorySettings option 
+      GenerateLoadScripts : bool option }
 
     static member Default =
         { CopyLocal = None
@@ -526,7 +578,8 @@ type InstallSettings =
           Excludes = []
           Aliases = Map.empty
           CopyContentToOutputDirectory = None
-          OmitContent = None }
+          OmitContent = None 
+          GenerateLoadScripts = None }
 
     member this.ToString(asLines) =
         let options =
@@ -560,7 +613,11 @@ type InstallSettings =
               match this.FrameworkRestrictions with
               | FrameworkRestrictionList [] -> ()
               | AutoDetectFramework -> ()
-              | FrameworkRestrictionList list -> yield "framework: " + (String.Join(", ",list))]
+              | FrameworkRestrictionList list -> yield "framework: " + (String.Join(", ",list))
+              match this.GenerateLoadScripts with
+              | Some true -> yield "generate_load_scripts: true"
+              | Some false -> yield "generate_load_scripts: false"
+              | None -> () ]
 
         let separator = if asLines then Environment.NewLine else ", "
         String.Join(separator,options)
@@ -577,6 +634,7 @@ type InstallSettings =
                 CopyContentToOutputDirectory = self.CopyContentToOutputDirectory ++ other.CopyContentToOutputDirectory
                 ReferenceCondition = self.ReferenceCondition ++ other.ReferenceCondition
                 Excludes = self.Excludes @ other.Excludes
+                CreateBindingRedirects = self.CreateBindingRedirects ++ other.CreateBindingRedirects
                 IncludeVersionInPath = self.IncludeVersionInPath ++ other.IncludeVersionInPath
         }
 
@@ -596,7 +654,7 @@ type InstallSettings =
                 | _ -> None
               FrameworkRestrictions =
                 match getPair "framework" with
-                | Some s -> FrameworkRestrictionList(parseRestrictions s)
+                | Some s -> FrameworkRestrictionList(parseRestrictions true s)
                 | _ -> FrameworkRestrictionList []
               OmitContent =
                 match getPair "content" with
@@ -632,6 +690,11 @@ type InstallSettings =
                 match getPair "copy_local" with
                 | Some "false" -> Some false 
                 | Some "true" -> Some true
+                | _ -> None
+              GenerateLoadScripts =
+                match getPair "generate_load_scripts" with
+                | Some "on"  | Some "true" -> Some true
+                | Some "off" | Some "false" -> Some true
                 | _ -> None }
 
         // ignore resolver settings here

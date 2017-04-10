@@ -5,6 +5,7 @@ open System
 
 [<RequireQualifiedAccess>]
 /// The Framework version.
+// Each time a new version is added NuGetPackageCache.CurrentCacheVersion should be bumped.
 type FrameworkVersion = 
     | V1
     | V1_1
@@ -62,6 +63,7 @@ type FrameworkVersion =
 
 [<RequireQualifiedAccess>]
 /// The .NET Standard version.
+// Each time a new version is added NuGetPackageCache.CurrentCacheVersion should be bumped.
 type DotNetStandardVersion = 
     | V1_0
     | V1_1
@@ -91,16 +93,34 @@ type DotNetStandardVersion =
         | DotNetStandardVersion.V1_6 -> "16"
 
 [<RequireQualifiedAccess>]
+/// The UAP version.
+// Each time a new version is added NuGetPackageCache.CurrentCacheVersion should be bumped.
+type UAPVersion = 
+    | V10
+    override this.ToString() =
+        match this with
+        | V10 -> "10.0"
+
+    member this.ShortString() =
+        match this with
+        | UAPVersion.V10 -> "100"
+
+
+[<RequireQualifiedAccess>]
 /// The .NET Standard version.
+// Each time a new version is added NuGetPackageCache.CurrentCacheVersion should be bumped.
 type DotNetCoreVersion = 
     | V1_0
+    | V1_1
     override this.ToString() =
         match this with
         | V1_0 -> "v1.0"
+        | V1_1 -> "v1.1"
 
     member this.ShortString() =
         match this with
         | DotNetCoreVersion.V1_0 -> "10"
+        | DotNetCoreVersion.V1_1 -> "11"
 
 module KnownAliases =
     let Data =
@@ -109,12 +129,14 @@ module KnownAliases =
          ".netframework", "net"
          ".netcore", "netcore"
          "winrt", "netcore"
+         "netcoreapp", "netcore"
          "silverlight", "sl"
          "windowsphone", "wp"
          "windows", "win"
          "windowsPhoneApp", "wpa"
          ".netportable", "portable"
          "netportable", "portable"
+         "10.0", "100"
          "0.0", ""
          ".", ""
          " ", "" ]
@@ -122,8 +144,10 @@ module KnownAliases =
 
 
 /// Framework Identifier type.
+// Each time a new version is added NuGetPackageCache.CurrentCacheVersion should be bumped.
 type FrameworkIdentifier = 
     | DotNetFramework of FrameworkVersion
+    | UAP of UAPVersion
     | DNX of FrameworkVersion
     | DNXCore of FrameworkVersion
     | DotNetStandard of DotNetStandardVersion
@@ -154,6 +178,7 @@ type FrameworkIdentifier =
         | Native(_) -> "native"
         | Runtimes(_) -> "runtimes"
         | XamariniOS -> "xamarinios"
+        | UAP v -> "uap" + v.ShortString()
         | XamarinMac -> "xamarinmac"
         | Windows v -> "win" + v
         | WindowsPhoneSilverlight v -> "wp" + v
@@ -171,6 +196,7 @@ type FrameworkIdentifier =
         | Runtimes(_) -> [ ]
         | XamariniOS -> [ ]
         | XamarinMac -> [ ]
+        | UAP UAPVersion.V10 -> [ ]
         | DotNetFramework FrameworkVersion.V1 -> [ ]
         | DotNetFramework FrameworkVersion.V1_1 -> [ DotNetFramework FrameworkVersion.V1 ]
         | DotNetFramework FrameworkVersion.V2 -> [ DotNetFramework FrameworkVersion.V1_1 ]
@@ -197,6 +223,7 @@ type FrameworkIdentifier =
         | DotNetStandard DotNetStandardVersion.V1_5 -> [ DotNetStandard DotNetStandardVersion.V1_4 ]
         | DotNetStandard DotNetStandardVersion.V1_6 -> [ DotNetStandard DotNetStandardVersion.V1_5 ]
         | DotNetCore DotNetCoreVersion.V1_0 -> [ DotNetStandard DotNetStandardVersion.V1_6 ]
+        | DotNetCore DotNetCoreVersion.V1_1 -> [ DotNetCore DotNetCoreVersion.V1_0 ]
         | Silverlight "v3.0" -> [ ]
         | Silverlight "v4.0" -> [ Silverlight "v3.0" ]
         | Silverlight "v5.0" -> [ Silverlight "v4.0" ]
@@ -217,6 +244,7 @@ type FrameworkIdentifier =
     /// Return if the parameter is of the same framework category (dotnet, windows phone, silverlight, ...)
     member x.IsSameCategoryAs y =
         match (x, y) with
+        | UAP _, UAP _ -> true
         | DotNetFramework _, DotNetFramework _ -> true
         | DotNetStandard _, DotNetStandard _ -> true
         | DotNetCore _, DotNetCore _ -> true
@@ -272,6 +300,8 @@ type FrameworkIdentifier =
     member x.IsBetween(a,b) = x.IsAtLeast a && x.IsAtMost b
 
 module FrameworkDetection =
+    open Logging
+
     let Extract =
         memoize 
           (fun (path:string) ->
@@ -281,6 +311,7 @@ module FrameworkDetection =
                      sb.Replace(pattern,replacement) |> ignore
                 sb.ToString()
 
+            // Each time the parsing is changed, NuGetPackageCache.CurrentCacheVersion should be bumped.
             let result = 
                 match path with
                 | x when x.StartsWith "runtimes/" -> Some(Runtimes(x.Substring(9)))
@@ -299,8 +330,9 @@ module FrameworkDetection =
                 | "net461" -> Some (DotNetFramework FrameworkVersion.V4_6_1)
                 | "net462" -> Some (DotNetFramework FrameworkVersion.V4_6_2)
                 | "net463" -> Some (DotNetFramework FrameworkVersion.V4_6_3)
+                | "uap100" -> Some (UAP UAPVersion.V10)
                 | "monotouch" | "monotouch10" | "monotouch1" -> Some MonoTouch
-                | "monoandroid" | "monoandroid10" | "monoandroid1" | "monoandroid22" | "monoandroid23" | "monoandroid44" | "monoandroid403" | "monoandroid43" | "monoandroid41" | "monoandroid50" | "monoandroid60" -> Some MonoAndroid
+                | "monoandroid" | "monoandroid10" | "monoandroid1" | "monoandroid22" | "monoandroid23" | "monoandroid44" | "monoandroid403" | "monoandroid43" | "monoandroid41" | "monoandroid50" | "monoandroid60" | "monoandroid70" -> Some MonoAndroid
                 | "monomac" | "monomac10" | "monomac1" -> Some MonoMac
                 | "xamarinios" | "xamarinios10" | "xamarinios1" | "xamarin.ios10" -> Some XamariniOS
                 | "xamarinmac" | "xamarinmac20" | "xamarin.mac20" -> Some XamarinMac
@@ -318,8 +350,8 @@ module FrameworkDetection =
                 | "sl5" | "sl50" -> Some (Silverlight "v5.0")
                 | "win8" | "windows8" | "win80" | "netcore45" | "win" | "winv45" -> Some (Windows "v4.5")
                 | "win81" | "windows81"  | "netcore46" | "netcore451" | "winv451" -> Some (Windows "v4.5.1")
-                | "wp7" | "wp70" | "sl4-wp7"| "sl4-wp70" -> Some (WindowsPhoneSilverlight "v7.0")
-                | "wp71" | "sl4-wp71" | "sl4-wp"  -> Some (WindowsPhoneSilverlight "v7.1")
+                | "wp7" | "wp70" | "wpv7" | "wpv70" | "sl4-wp7"| "sl4-wp70" -> Some (WindowsPhoneSilverlight "v7.0")
+                | "wp71" | "wpv71" | "sl4-wp71" | "sl4-wp"  -> Some (WindowsPhoneSilverlight "v7.1")
                 | "wpa00" | "wpa" | "wpa81" | "wpav81" | "wpapp81" | "wpapp" -> Some (WindowsPhoneApp "v8.1")
                 | "wp8" | "wp80"  | "wpv80" -> Some (WindowsPhoneSilverlight "v8.0")
                 | "wp81"  | "wpv81" -> Some (WindowsPhoneSilverlight "v8.1")
@@ -333,7 +365,8 @@ module FrameworkDetection =
                 | "netstandard14" -> Some(DotNetStandard DotNetStandardVersion.V1_4)
                 | "netstandard15" -> Some(DotNetStandard DotNetStandardVersion.V1_5)
                 | "netstandard16" -> Some(DotNetStandard DotNetStandardVersion.V1_6)
-                | "netcoreapp10" -> Some (DotNetCore DotNetCoreVersion.V1_0)
+                | "netcore10" -> Some (DotNetCore DotNetCoreVersion.V1_0)
+                | "netcore11" -> Some (DotNetCore DotNetCoreVersion.V1_1)
                 | v when v.StartsWith "netstandard" -> Some(DotNetStandard DotNetStandardVersion.V1_6)
                 | _ -> None
             result)
@@ -488,6 +521,9 @@ module KnownTargetProfiles =
         SinglePlatform(Silverlight "v4.0")
         SinglePlatform(Silverlight "v5.0")]
 
+    let UAPProfiles =
+       [SinglePlatform(UAP UAPVersion.V10)]
+
     let WindowsPhoneSilverlightProfiles =
        [SinglePlatform(WindowsPhoneSilverlight "v7.0")
         SinglePlatform(WindowsPhoneSilverlight "v7.1")
@@ -558,6 +594,7 @@ module KnownTargetProfiles =
     let AllDotNetProfiles =
        DotNetFrameworkProfiles @ 
        WindowsProfiles @ 
+       UAPProfiles @
        SilverlightProfiles @
        WindowsPhoneSilverlightProfiles @
        [SinglePlatform(MonoAndroid)

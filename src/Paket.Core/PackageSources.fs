@@ -1,4 +1,4 @@
-﻿module Paket.PackageSources
+﻿module Paket.PackageSources 
 
 open System
 open System.IO
@@ -27,10 +27,18 @@ type EnvironmentVariable =
         else
             None
 
+[<StructuredFormatDisplay("{AsString}")>]
 type NugetSourceAuthentication = 
     | PlainTextAuthentication of username : string * password : string
     | EnvVarAuthentication of usernameVar : EnvironmentVariable * passwordVar : EnvironmentVariable
-    | ConfigAuthentication of username : string * password : string
+    | ConfigAuthentication of username : string * password : string 
+        with
+            override x.ToString() =
+                match x with
+                    | PlainTextAuthentication(u,_) -> sprintf "PlainTextAuthentication (username = %s, password = ***)" u
+                    | EnvVarAuthentication(u,_) ->  sprintf "EnvVarAuthentication (usernameVar = %s, passwordVar = ***)" u.Variable
+                    | ConfigAuthentication(u,_) -> sprintf "ConfigAuthentication (username = %s, password = ***)" u
+            member x.AsString = x.ToString()
 
 let toBasicAuth = function
     | PlainTextAuthentication(username,password) | ConfigAuthentication(username, password) ->
@@ -43,6 +51,10 @@ let tryParseWindowsStyleNetworkPath (path : string) =
     if (isUnix || isMacOS) && trimmed.StartsWith @"\\" then
         trimmed.Replace('\\', '/') |> sprintf "smb:%s" |> Some
     else None
+
+let RemoveOutsideQuotes(path : string) =
+    let trimChars = [|'\"'|]
+    path.Trim(trimChars)
 
 type NugetSource = 
     { Url : string
@@ -223,7 +235,14 @@ type PackageSource =
         | NuGetV2 x -> n x.Url x.Authentication
         | NuGetV3 x -> n x.Url x.Authentication
         | LocalNuGet(path,_) -> 
-            if not <| Directory.Exists path then 
+            if not <| Directory.Exists (RemoveOutsideQuotes path) then 
                 traceWarnfn "Local NuGet feed doesn't exist: %s." path
 
 let DefaultNuGetSource = PackageSource.NuGetV2Source Constants.DefaultNuGetStream
+
+
+type NugetPackage = {
+    Id : string
+    VersionRange : VersionRange
+    TargetFramework : string option
+}

@@ -1,46 +1,70 @@
 ﻿module Paket.DependencyChangeDetection
 
-open Paket.Domain
 open Paket.Requirements
 open Paket.PackageResolver
-open Logging
+
+type DependencyChangeType =
+    /// The restrictions changed
+    | RestrictionsChanged
+    /// The settigns of the package changed
+    | SettingsChanged
+    /// The Version in the LockFile doesn't match the spec in the dependencies file.
+    | VersionNotValid
+    /// Package from dependencies file was not found in lockfile
+    | PackageNotFoundInLockFile
+    /// Group from dependencies file was not found in lockfile
+    | GroupNotFoundInLockFile
+    /// Package from lock file was not found in dependencies file
+    | PackageNotFoundInDependenciesFile
 
 let findNuGetChangesInDependenciesFile(dependenciesFile:DependenciesFile,lockFile:LockFile,strict) =
     let allTransitives groupName = lockFile.GetTransitiveDependencies groupName
-    let hasChanged groupName transitives (newRequirement:PackageRequirement) (originalPackage:ResolvedPackage) =
+    let getChanges groupName transitives (newRequirement:PackageRequirement) (originalPackage:ResolvedPackage) =
         let settingsChanged() =
             if newRequirement.Settings <> originalPackage.Settings then
-                if newRequirement.Settings.FrameworkRestrictions <> originalPackage.Settings.FrameworkRestrictions then
-                    transitives |> Seq.contains originalPackage.Name |> not
-                else true
-            else false
+                if newRequirement.Settings = { originalPackage.Settings with FrameworkRestrictions = AutoDetectFramework } then
+                    []
+                elif newRequirement.Settings.FrameworkRestrictions <> originalPackage.Settings.FrameworkRestrictions then
+                    let isTransitive = transitives |> Seq.contains originalPackage.Name
+                    if not isTransitive then
+                        [RestrictionsChanged]
+                    else []
+                else [SettingsChanged]
+            else []
 
         let requirementOk =
-            if strict then
-                newRequirement.VersionRequirement.IsInRange originalPackage.Version
-            else
-                newRequirement.IncludingPrereleases().VersionRequirement.IsInRange originalPackage.Version
+            let isInRange =
+                if strict then
+                    newRequirement.VersionRequirement.IsInRange originalPackage.Version
+                else
+                    newRequirement.IncludingPrereleases().VersionRequirement.IsInRange originalPackage.Version
+            if not isInRange then
+                [VersionNotValid]
+            else []
 
-        (not requirementOk) || settingsChanged()
+        requirementOk @ settingsChanged()
 
     let added groupName transitives =
         match dependenciesFile.Groups |> Map.tryFind groupName with
         | None -> Set.empty
-        | Some group ->
+        | Some depsGroup ->
             let lockFileGroup = lockFile.Groups |> Map.tryFind groupName 
-            group.Packages
+            depsGroup.Packages
             |> Seq.map (fun d ->
-                d.Name, { d with Settings = group.Options.Settings + d.Settings })
-            |> Seq.filter (fun (name,dependenciesFilePackage) ->
+                d.Name, { d with Settings = depsGroup.Options.Settings + d.Settings })
+            |> Seq.map (fun (name,dependenciesFilePackage) ->
+                name, dependenciesFilePackage,
                 match lockFileGroup with
-                | None -> true
+                | None -> [GroupNotFoundInLockFile]
                 | Some group ->
                     match group.Resolution.TryFind name with
                     | Some lockFilePackage ->
-                        let p' = { lockFilePackage with Settings = group.Options.Settings + lockFilePackage.Settings }
-                        hasChanged groupName transitives dependenciesFilePackage p'
-                    | _ -> true)
-            |> Seq.map (fun (p,_) -> groupName,p)
+                        getChanges groupName transitives 
+                            { dependenciesFilePackage with Settings = depsGroup.Options.Settings + dependenciesFilePackage.Settings }
+                            { lockFilePackage with Settings = group.Options.Settings + lockFilePackage.Settings }
+                    | _ -> [PackageNotFoundInLockFile])
+            |> Seq.filter (fun (_,_, changes) -> changes.Length > 0)
+            |> Seq.map (fun (p,_, changes) -> groupName, p, changes)
             |> Set.ofSeq
     
     let modified groupName transitives = 
@@ -58,11 +82,11 @@ let findNuGetChangesInDependenciesFile(dependenciesFile:DependenciesFile,lockFil
             | Some pr ->
                 let t = t.Value
                 let t = { t with Settings = lockFile.GetGroup(groupName).Options.Settings + t.Settings }
-                if hasChanged groupName transitives pr t then 
-                    yield groupName, name // Modified
-            | _ -> yield groupName, name // Removed
+                yield groupName, name, getChanges groupName transitives pr t // Modified
+            | _ -> yield groupName, name, [PackageNotFoundInDependenciesFile] // Removed
         ]
-        |> List.map (fun (g,p) -> lockFile.GetAllNormalizedDependenciesOf(g,p,lockFile.FileName))
+        |> List.filter (fun (_,_, changes) -> changes.Length > 0)
+        |> List.map (fun (g,p, changes) -> lockFile.GetAllNormalizedDependenciesOf(g,p,lockFile.FileName) |> Seq.map (fun (a,b) -> a,b,changes))
         |> Seq.concat
         |> Set.ofSeq
 
@@ -150,19 +174,13 @@ let findRemoteFileChangesInDependenciesFile(dependenciesFile:DependenciesFile,lo
             lockFileGroup.RemoteFiles
             |> List.map RemoteFileChange.CreateResolvedVersion
             |> List.map (fun r ->
-                match dependenciesFileRemoteFiles |> Seq.tryFind (fun d -> d.Name = r.Name) with
+                match dependenciesFileRemoteFiles |> Seq.tryFind (fun d -> d.Name = r.Name && d.Origin = r.Origin) with
                 | Some d -> { r with Commit = d.Commit }
                 | _ -> { r with Commit = None })
             |> Set.ofList
 
-        let u =
-            dependenciesFileRemoteFiles
-            |> Set.union lockFileRemoteFiles
-        let i =
-            dependenciesFileRemoteFiles
-            |> Set.intersect lockFileRemoteFiles
-
-        Set.difference u i
+        let missingRemotes = Set.difference dependenciesFileRemoteFiles lockFileRemoteFiles
+        missingRemotes
 
     groupNames
     |> Seq.map (fun groupName ->
@@ -200,7 +218,7 @@ let GetChanges(dependenciesFile,lockFile,strict) =
     let nuGetChanges = findNuGetChangesInDependenciesFile(dependenciesFile,lockFile,strict)
     let nuGetChangesPerGroup =
         nuGetChanges
-        |> Seq.groupBy fst
+        |> Seq.groupBy (fun (f,_,__) -> f)
         |> Map.ofSeq
 
     let remoteFileChanges = findRemoteFileChangesInDependenciesFile(dependenciesFile,lockFile)

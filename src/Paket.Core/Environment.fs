@@ -9,8 +9,8 @@ open InstallProcess
 type PaketEnv = {
     RootDirectory : DirectoryInfo
     DependenciesFile : DependenciesFile
-    LockFile : option<LockFile>
-    Projects : list<ProjectFile * ReferencesFile>
+    LockFile : LockFile option
+    Projects : (ProjectFile * ReferencesFile) list
 }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -33,8 +33,8 @@ module PaketEnv =
                 else
                     try
                         ok (DependenciesFile.ReadFromFile(fi.FullName))
-                    with _ ->
-                        fail (DependenciesFileParseError fi)
+                    with e ->
+                        DependenciesFileParseError(fi,e) |> fail
 
             let! lockFile =
                 let fi = FileInfo(Path.Combine(directory.FullName, Constants.LockFileName))
@@ -46,7 +46,7 @@ module PaketEnv =
                     with _ ->
                         fail (LockFileParseError fi)
 
-            let! projects = InstallProcess.findAllReferencesFiles(directory.FullName)
+            let! projects = RestoreProcess.findAllReferencesFiles(directory.FullName)
 
             return create directory dependenciesFile lockFile projects
     }

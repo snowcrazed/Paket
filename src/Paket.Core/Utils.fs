@@ -15,7 +15,15 @@ open Paket.Domain
 
 #if NETSTANDARD1_6
 open System.Net.Http
+#else
+// TODO: Activate this in .NETCore 2.0
+ServicePointManager.SecurityProtocol <- unbox 192 ||| unbox 768 ||| unbox 3072 ||| unbox 48
+                                        ///SecurityProtocolType.Tls ||| SecurityProtocolType.Tls11 ||| SecurityProtocolType.Tls12 ||| SecurityProtocolType.Ssl3
 #endif
+
+/// Adds quotes around the string
+/// [omit]
+let quote (str:string) = "\"" + str.Replace("\"","\\\"") + "\""
 
 let acceptXml = "application/atom+xml,application/xml"
 let acceptJson = "application/atom+json,application/json"
@@ -78,10 +86,13 @@ let normalizeLocalPath (path:string) =
     else
         RelativePath path
         
-let getDirectoryInfo pathInfo root =
+let getDirectoryInfoForLocalNuGetFeed pathInfo alternativeProjectRoot root =
     match pathInfo with
     | AbsolutePath s -> DirectoryInfo s 
-    | RelativePath s -> DirectoryInfo(Path.Combine(root, s))
+    | RelativePath s ->
+        match alternativeProjectRoot with
+        | Some root -> DirectoryInfo(Path.Combine(root, s))
+        | None -> DirectoryInfo(Path.Combine(root, s))
         
 /// Creates a directory if it does not exist.
 let createDir path = 
@@ -297,8 +308,8 @@ let isMatchingOperatingSystem (operatingSystemFilter : string option) =
 let isMatchingPlatform (operatingSystemFilter : string option) =
     match operatingSystemFilter with
     | None -> true
-    | Some filter when filter = "mono" -> isMono
-    | Some filter when filter = "windows" -> not isMono
+    | Some filter when filter = "mono" -> isMonoRuntime
+    | Some filter when filter = "windows" -> not isMonoRuntime
     | _ -> isMatchingOperatingSystem operatingSystemFilter
 
 /// [omit]
@@ -310,6 +321,19 @@ let inline normalizeXml (doc:XmlDocument) =
     doc.WriteTo xmlTextWriter
     xmlTextWriter.Flush()
     stringWriter.GetStringBuilder() |> string
+
+let saveNormalizedXml (fileName:string) (doc:XmlDocument) =
+    // combination of saveFile and normalizeXml which ensures that the
+    // file encoding matches the one listed in the XML itself.
+    tracefn "Saving xml %s" fileName
+    let settings = XmlWriterSettings (Indent=true)
+
+    try
+        use fstream = File.Create(fileName)
+        use xmlTextWriter = XmlWriter.Create(fstream, settings)
+        doc.WriteTo(xmlTextWriter) |> ok
+    with _ ->
+        FileSaveError fileName |> fail
 
 let normalizeFeedUrl (source:string) =
     match source.TrimEnd([|'/'|]) with
@@ -474,7 +498,8 @@ type System.Net.WebClient with
             System.String.Format
                 (System.Globalization.CultureInfo.InvariantCulture, fileTemplate, boundary, "package", "package", "application/octet-stream") 
             |> Encoding.UTF8.GetBytes
-        let newlineBytes = Environment.NewLine |> Encoding.UTF8.GetBytes
+        // we use a windows-style newline rather than Environment.NewLine for compatibility
+        let newlineBytes = "\r\n" |> Encoding.UTF8.GetBytes
         let trailerbytes = String.Format(System.Globalization.CultureInfo.InvariantCulture, "--{0}--", boundary) |> Encoding.UTF8.GetBytes
         x.Headers.Add(HttpRequestHeader.ContentType, "multipart/form-data; boundary=" + boundary)
         use stream = x.OpenWrite(url, "PUT")
@@ -948,4 +973,31 @@ module ObservableExtensions =
         let distinct (a: IObservable<'a>): IObservable<'a> =
             let seen = HashSet()
             Observable.filter seen.Add a
+
+type StringBuilder with
+
+    member self.AddLine text =
+        self.AppendLine text |> ignore
+
+    member self.AppendLinef text = Printf.kprintf self.AppendLine text
+
+[<RequireQualifiedAccess>]
+module Seq =
+    /// Unzip a seq by mapping the elements that satisfy the predicate 
+    /// into the first seq and mapping the elements that fail to satisfy the predicate
+    /// into the second seq
+    let partitionAndChoose predicate choosefn1 choosefn2 sqs =   
+        (([],[]),sqs)
+        ||> Seq.fold (fun (xs,ys) elem ->
+            if predicate elem then 
+                match choosefn1 elem with 
+                | Some x ->  (x::xs,ys) 
+                | None -> xs,ys
+            else 
+                match choosefn2 elem with
+                | Some y -> xs,y::ys 
+                | None -> xs,ys
+        ) |> fun (xs,ys) ->
+            List.rev xs :> seq<_>, List.rev ys :> seq<_>
+
 

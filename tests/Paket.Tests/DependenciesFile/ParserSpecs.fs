@@ -64,6 +64,16 @@ let ``should read simple config with prerelease and comment``() =
     packageDefinition.Range |> shouldEqual (VersionRange.AtLeast("3.2"))
     packageDefinition.PreReleases |> shouldEqual (PreReleaseStatus.All)
 
+let configWithVersionLine = """
+version 1.2.3 --prefer-nuget
+source "http://www.nuget.org/api/v2"
+nuget Castle.Windsor-log4net
+"""
+
+[<Test>]
+let ``should read simple config with version line for bootstrapper``() = 
+    DependenciesFile.FromCode(configWithVersionLine) |> ignore
+
 
 let config2 = """
 source "http://www.nuget.org/api/v2"
@@ -1373,4 +1383,86 @@ let ``async cache should work``() =
             |> Async.Parallel |> Async.Ignore
     } |> Async.RunSynchronously
     !x |> shouldEqual 1
+
+let autodetectconfig = """
+framework: auto-detect
+source https://api.nuget.org/v3/index.json
+nuget nlog
+
+group build
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget GitVersion
+
+group tests
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget xunit
+"""
+
+[<Test>]
+let ``should read autodetect from main group``() = 
+    let cfg = DependenciesFile.FromCode(autodetectconfig)
+    cfg.Groups.[Constants.MainDependencyGroup].Options.Settings.FrameworkRestrictions 
+    |> shouldEqual FrameworkRestrictions.AutoDetectFramework
+
+let autodetectconfigSpecific = """
+//`auto-detect` with explicit 'Main' group fails
+group Main
+framework: auto-detect
+source https://api.nuget.org/v3/index.json
+nuget nlog
+
+group build
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget GitVersion
+
+group tests
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget xunit
+"""
+
+[<Test>]
+let ``should read autodetect from specific main group``() = 
+    let cfg = DependenciesFile.FromCode(autodetectconfigSpecific)
+    cfg.Groups.[Constants.MainDependencyGroup].Options.Settings.FrameworkRestrictions 
+    |> shouldEqual FrameworkRestrictions.AutoDetectFramework
+
+[<Test>]
+let ``parsing generate load scripts`` () =
+    let casesAndExpectation = [
+      Some "true"  , Some true
+      Some "on"    , Some true
+      Some "false" , Some false
+      Some "off"   , Some false
+      None         , None
+    ]
+    let results = [
+        for case, expectation in casesAndExpectation do
+            let config = 
+                DependenciesFile.FromCode <|
+                match case with
+                | Some value ->
+                    sprintf """
+      source https://nuget.org/api/v2
+      generate_load_scripts: %s""" value
+                | None ->
+                    """
+      source https://nuget.org/api/v2
+      """
+            let result = config.Groups.[Constants.MainDependencyGroup].Options.Settings.GenerateLoadScripts
+            yield (result = expectation), (case, expectation, result)
+    ]
+
+    let failedResults = results |> Seq.filter (fst >> not)
+    if failedResults |> (Seq.isEmpty >> not) then
+        for _, (case, expectation, result) in failedResults do
+            printfn "case %A expected %A got %A" case expectation result
+        failwith "failed"
 
