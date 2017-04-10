@@ -24,7 +24,7 @@ with
         member this.Usage =
             match this with
             | Nuget(_) -> "NuGet package id."
-            | Group(_) -> "Add the package to the given group. If omited the Main group is used."
+            | Group(_) -> "Add the package to the given group. If omitted the Main group is used."
             | Version(_) -> "Allows to specify version of the package."
             | Project(_) -> "Allows to add the package to a single project only."
             | Force -> "Forces the download and reinstallation of all packages."
@@ -73,7 +73,7 @@ with
     interface IArgParserTemplate with
         member this.Usage =
             match this with
-            | Group(_) -> "Allows to specify a group. If omited the Main group is used."
+            | Group(_) -> "Allows to specify a group. If omitted the Main group is used."
             | Packages(_) -> "List of packages."
 
 type InitArgs =
@@ -100,7 +100,11 @@ type InstallArgs =
     | Keep_Major
     | Keep_Minor
     | Keep_Patch
+    | [<CustomCommandLine("--generate-load-scripts")>] Generate_Load_Scripts
     | [<CustomCommandLine("--only-referenced")>] Install_Only_Referenced
+    | [<CustomCommandLine("project-root")>] Project_Root of target:string
+    | [<CustomCommandLine("load-script-framework")>] Load_Script_Framework of target:string
+    | [<CustomCommandLine("load-script-type")>] Load_Script_Type of id:string
     | Touch_Affected_Refs
 with
     interface IArgParserTemplate with
@@ -111,19 +115,25 @@ with
             | CreateNewBindingFiles -> "Creates binding redirect files if needed."
             | Clean_Redirects -> "Removes all binding redirects that are not specified by Paket."
             | Install_Only_Referenced -> "Only install packages that are referenced in paket.references files, instead of all packages in paket.dependencies."
+            | Generate_Load_Scripts -> "Allows to generate C# and F# include scripts which references installed packages in a interactive environment like F# Interactive or ScriptCS."
             | Keep_Major -> "Allows only updates that are not changing the major version of the NuGet packages."
             | Keep_Minor -> "Allows only updates that are not changing the minor version of the NuGet packages."
             | Keep_Patch -> "Allows only updates that are not changing the patch version of the NuGet packages."
             | Touch_Affected_Refs -> "Touches project files referencing packages which are affected, to help incremental build tools detecting the change."
+            | Project_Root _ -> "Alternative project root [only used for tooling]."
+            | Load_Script_Framework _ -> "Framework identifier to generate scripts for, such as net45 or net4."
+            | Load_Script_Type _ -> "Language to generate scripts for, must be one of 'fsx' or 'csx'."
 
 type OutdatedArgs =
     | Ignore_Constraints
+    | [<CustomCommandLine("group")>] Group of name:string
     | [<AltCommandLine("--pre")>] Include_Prereleases
 with
     interface IArgParserTemplate with
         member this.Usage =
             match this with
             | Ignore_Constraints -> "Ignores the version requirement as in the paket.dependencies file."
+            | Group(_) -> "Just check for one group."
             | Include_Prereleases -> "Includes prereleases."
 
 type RemoveArgs =
@@ -138,7 +148,7 @@ with
         member this.Usage =
             match this with
             | Nuget(_) -> "NuGet package id."
-            | Group(_) -> "Removes the package from the given group. If omited the Main group is used."
+            | Group(_) -> "Removes the package from the given group. If omitted the Main group is used."
             | Project(_) -> "Allows to remove the package from a single project only."
             | Force -> "Forces the download and reinstallation of all packages."
             | Interactive -> "Asks the user for every project if he or she wants to remove the package from the projects's paket.references file. By default every installation of the package is removed."
@@ -156,7 +166,9 @@ type RestoreArgs =
     | [<CustomCommandLine("--only-referenced")>] Install_Only_Referenced
     | [<CustomCommandLine("--touch-affected-refs")>] Touch_Affected_Refs
     | [<CustomCommandLine("--ignore-checks")>] Ignore_Checks
+    | [<CustomCommandLine("--fail-on-checks")>] Fail_On_Checks
     | [<CustomCommandLine("group")>] Group of name:string
+    | [<Unique>] Project of file_name:string
     | [<Unique>] References_Files of file_name:string list
 with
     interface IArgParserTemplate with
@@ -167,7 +179,9 @@ with
             | Install_Only_Referenced -> "Allows to restore packages that are referenced in paket.references files, instead of all packages in paket.dependencies."
             | Touch_Affected_Refs -> "Touches project files referencing packages which are being restored, to help incremental build tools detecting the change."
             | Ignore_Checks -> "Skips the test if paket.dependencies and paket.lock are in sync."
-            | References_Files(_) -> "Allows to restore all packages from the given paket.references files. This implies --only-referenced."
+            | Fail_On_Checks -> "Causes the restore to fail if any of the checks fail."
+            | Project(_) -> "Allows to restore dependencies for a project."
+            | References_Files(_) -> "Allows to restore all packages from the given paket.references files."
 
 type SimplifyArgs =
     | [<AltCommandLine("-i")>] Interactive
@@ -220,6 +234,17 @@ with
             | SearchText(_) -> "Search text of a Package."
             | Source(_) -> "Allows to specify the package source feed."
             | MaxResults(_) -> "Maximum number of results."
+
+            
+type FixNuspecArgs =
+    | [<CustomCommandLine("file")>] File of text:string
+    | [<CustomCommandLine("references-file")>] ReferencesFile of text:string
+with
+    interface IArgParserTemplate with
+        member this.Usage =
+            match this with
+            | File(_) -> "FileName of the nuspec file."
+            | ReferencesFile(_) -> "FileName of the nuspec file."
 
 type ShowInstalledPackagesArgs =
     | All
@@ -301,7 +326,7 @@ with
             | ApiKey(_) -> "Optionally specify your API key on the command line. Otherwise uses the value of the `nugetkey` environment variable."
             | EndPoint(_) -> "Optionally specify a custom api endpoint to push to. Defaults to `/api/v2/package`."
 
-type GenerateIncludeScriptsArgs = 
+type GenerateLoadScriptsArgs = 
     | [<CustomCommandLine("framework")>] Framework of target:string
     | [<CustomCommandLine("type")>] ScriptType of id:string
 with
@@ -346,11 +371,13 @@ type Command =
     | [<CustomCommandLine("update")>]                   Update of ParseResults<UpdateArgs>
     | [<CustomCommandLine("find-packages")>]            FindPackages of ParseResults<FindPackagesArgs>
     | [<CustomCommandLine("find-package-versions")>]    FindPackageVersions of ParseResults<FindPackageVersionsArgs>
+    | [<CustomCommandLine("fix-nuspec")>]               FixNuspec of ParseResults<FixNuspecArgs>
     | [<CustomCommandLine("show-installed-packages")>]  ShowInstalledPackages of ParseResults<ShowInstalledPackagesArgs>
     | [<CustomCommandLine("show-groups")>]              ShowGroups of ParseResults<ShowGroupsArgs>
     | [<CustomCommandLine("pack")>]                     Pack of ParseResults<PackArgs>
     | [<CustomCommandLine("push")>]                     Push of ParseResults<PushArgs>
-    | [<CustomCommandLine("generate-include-scripts")>] GenerateIncludeScripts of ParseResults<GenerateIncludeScriptsArgs>
+    | [<CustomCommandLine("generate-include-scripts")>] GenerateIncludeScripts of ParseResults<GenerateLoadScriptsArgs> // backward compatibility
+    | [<CustomCommandLine("generate-load-scripts")>]    GenerateLoadScripts of ParseResults<GenerateLoadScriptsArgs>
     | [<CustomCommandLine("why")>]                      Why of ParseResults<WhyArgs>
 with
     interface IArgParserTemplate with
@@ -371,21 +398,23 @@ with
             | Update _ -> "Update one or all dependencies to their latest version and update projects."
             | FindPackages _ -> "Allows to search for packages."
             | FindPackageVersions _ -> "Allows to search for package versions."
+            | FixNuspec _ -> "Allows to patch a nuspec with the correct dependencies."
             | ShowInstalledPackages _ -> "Shows all installed top-level packages."
             | ShowGroups _ -> "Shows all groups."
             | Pack _ -> "Packs all paket.template files within this repository."
             | Push _ -> "Pushes the given `.nupkg` file."
-            | GenerateIncludeScripts _ -> "Allows to generate C# and F# include scripts which references installed packages in a interactive environment like F# Interactive oder ScriptCS."
+            | GenerateIncludeScripts _ -> "Obsolete, see generate-load-scripts."
+            | GenerateLoadScripts _ -> "Allows to generate C# and F# include scripts which references installed packages in a interactive environment like F# Interactive or ScriptCS."
             | Why _ -> "Prints user-friendly reason for referencing a specified package"
             | Log_File _ -> "Specify a log file for the paket process."
             | Silent -> "Suppress console output for the paket process."
             | Verbose -> "Enable verbose console output for the paket process." 
             | Version -> "Display the version." 
-            | From_Bootstrapper -> "Call comming from the '--run' feature of the bootstrapper." 
+            | From_Bootstrapper -> "Call coming from the '--run' feature of the bootstrapper." 
 
 let commandParser = ArgumentParser.Create<Command>(programName = "paket", errorHandler = new ProcessExiter())
 
-let markdown (subParser : ArgumentParser) (additionalText : string) =
+let markdown (subParser : ArgumentParser) (width : int) (additionalText : string) =
     let (afterCommandText, afterOptionsText) =
         let ensureLineBreak (text : string) = if String.IsNullOrEmpty(text) then text else text + Environment.NewLine + Environment.NewLine
         let cleanUp (text : string) = text.Replace("# [after-command]", "")
@@ -400,23 +429,28 @@ let markdown (subParser : ArgumentParser) (additionalText : string) =
 
     let parentMetadata = subParser.ParentInfo |> Option.get
 
+    let indentBy spaces (text:string) =
+        let whitespace = String(' ', spaces)
+        text.Split([|Environment.NewLine|], StringSplitOptions.None)
+        |> Seq.map (fun line -> whitespace + line)
+        |> String.concat Environment.NewLine
+
     let replace (pattern : string) (replacement : string) input =
         System.Text.RegularExpressions.Regex.Replace(input, pattern, replacement)
 
-    let syntax = subParser.PrintCommandLineSyntax()
-    let options =
-        subParser.PrintUsage(hideSyntax=true)
-        |> replace @"\s\t--help.*" ""
-        |> replace @"\t([-\w \[\]|\/\?<>\.]+):" (System.Environment.NewLine + @"  `$1`:")
+    let syntax = 
+        subParser.PrintCommandLineSyntax(usageStringCharacterWidth = width)
+        |> indentBy 4
+
+    let options = subParser.PrintUsage(hideSyntax=true, usageStringCharacterWidth = width)
 
     System.Text.StringBuilder()
         .Append("# paket ")
         .AppendLine(parentMetadata.Name)
         .AppendLine()
-        .AppendLine(String.concat Environment.NewLine parentMetadata.Description)
+        .AppendLine(parentMetadata.Description)
         .AppendLine()
-        .AppendLine("    [lang=batchfile]")
-        .Append("    ")
+        .AppendLine("    [lang=console]")
         .AppendLine(syntax)
         .AppendLine()
         .Append(afterCommandText)

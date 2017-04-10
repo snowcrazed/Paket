@@ -4,6 +4,7 @@ open System
 open Paket
 open Paket.Domain
 open Paket.PackageSources
+open Paket.Logging
 
 [<RequireQualifiedAccess>]
 type FrameworkRestriction = 
@@ -41,7 +42,16 @@ let getRestrictionList (frameworkRestrictions:FrameworkRestrictions) =
     | FrameworkRestrictionList list -> list
     | AutoDetectFramework -> failwith "The framework restriction could not be determined."
 
-let parseRestrictions(text:string) =
+let parseRestrictions failImmediatly (text:string) =
+    let handleError =
+        if failImmediatly then
+            failwith
+        else
+            if verbose then
+                (fun s ->
+                    traceError s
+                    traceVerbose Environment.StackTrace)
+            else traceError
     let text =
         // workaround missing spaces
         text.Replace("<=","<= ").Replace(">=",">= ").Replace("=","= ")
@@ -60,13 +70,17 @@ let parseRestrictions(text:string) =
         | None -> 
                 if PlatformMatching.extractPlatforms framework |> List.isEmpty |> not then
                     yield FrameworkRestriction.Portable framework
+                else
+                    handleError <| sprintf "Could not parse framework '%s'. Try to update or install again or report a paket bug." framework
         | Some x -> 
             if operatorSplit.[0] = ">=" then
                 if operatorSplit.Length < 4 then
                     yield FrameworkRestriction.AtLeast x
                 else
-                    match FrameworkDetection.Extract(operatorSplit.[3]) with
-                    | None -> ()
+                    let item = operatorSplit.[3]
+                    match FrameworkDetection.Extract(item) with
+                    | None ->
+                        handleError <| sprintf "Could not parse second framework of between operator '%s'. Try to update or install again or report a paket bug." item
                     | Some y -> yield FrameworkRestriction.Between(x,y)
             else
                 yield FrameworkRestriction.Exactly x]
@@ -449,6 +463,7 @@ let filterRestrictions (list1:FrameworkRestrictions) (list2:FrameworkRestriction
     match list1,list2 with 
     | FrameworkRestrictionList [], AutoDetectFramework -> AutoDetectFramework
     | AutoDetectFramework, FrameworkRestrictionList [] -> AutoDetectFramework
+    | AutoDetectFramework, AutoDetectFramework -> AutoDetectFramework
     | FrameworkRestrictionList list1 , FrameworkRestrictionList list2 ->
         let filtered =
             match list1, list2 with
@@ -550,7 +565,8 @@ type InstallSettings =
       CopyLocal : bool option
       Excludes : string list
       Aliases : Map<string,string>
-      CopyContentToOutputDirectory : CopyToOutputDirectorySettings option }
+      CopyContentToOutputDirectory : CopyToOutputDirectorySettings option 
+      GenerateLoadScripts : bool option }
 
     static member Default =
         { CopyLocal = None
@@ -562,7 +578,8 @@ type InstallSettings =
           Excludes = []
           Aliases = Map.empty
           CopyContentToOutputDirectory = None
-          OmitContent = None }
+          OmitContent = None 
+          GenerateLoadScripts = None }
 
     member this.ToString(asLines) =
         let options =
@@ -596,7 +613,11 @@ type InstallSettings =
               match this.FrameworkRestrictions with
               | FrameworkRestrictionList [] -> ()
               | AutoDetectFramework -> ()
-              | FrameworkRestrictionList list -> yield "framework: " + (String.Join(", ",list))]
+              | FrameworkRestrictionList list -> yield "framework: " + (String.Join(", ",list))
+              match this.GenerateLoadScripts with
+              | Some true -> yield "generate_load_scripts: true"
+              | Some false -> yield "generate_load_scripts: false"
+              | None -> () ]
 
         let separator = if asLines then Environment.NewLine else ", "
         String.Join(separator,options)
@@ -613,6 +634,7 @@ type InstallSettings =
                 CopyContentToOutputDirectory = self.CopyContentToOutputDirectory ++ other.CopyContentToOutputDirectory
                 ReferenceCondition = self.ReferenceCondition ++ other.ReferenceCondition
                 Excludes = self.Excludes @ other.Excludes
+                CreateBindingRedirects = self.CreateBindingRedirects ++ other.CreateBindingRedirects
                 IncludeVersionInPath = self.IncludeVersionInPath ++ other.IncludeVersionInPath
         }
 
@@ -632,7 +654,7 @@ type InstallSettings =
                 | _ -> None
               FrameworkRestrictions =
                 match getPair "framework" with
-                | Some s -> FrameworkRestrictionList(parseRestrictions s)
+                | Some s -> FrameworkRestrictionList(parseRestrictions true s)
                 | _ -> FrameworkRestrictionList []
               OmitContent =
                 match getPair "content" with
@@ -668,6 +690,11 @@ type InstallSettings =
                 match getPair "copy_local" with
                 | Some "false" -> Some false 
                 | Some "true" -> Some true
+                | _ -> None
+              GenerateLoadScripts =
+                match getPair "generate_load_scripts" with
+                | Some "on"  | Some "true" -> Some true
+                | Some "off" | Some "false" -> Some true
                 | _ -> None }
 
         // ignore resolver settings here

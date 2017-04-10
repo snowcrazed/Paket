@@ -1,5 +1,15 @@
-﻿module Paket.IntegrationTests.UpdatePackageSpecs
-
+﻿#if INTERACTIVE
+System.IO.Directory.SetCurrentDirectory __SOURCE_DIRECTORY__
+#r "../../packages/test/NUnit/lib/net45/nunit.framework.dll"
+#r "../../packages/build/FAKE/tools/Fakelib.dll"
+#r "../../packages/Chessie/lib/net40/Chessie.dll"
+#r "../../bin/paket.core.dll"
+#load "../../paket-files/test/forki/FsUnit/FsUnit.fs"
+#load "TestHelper.fs"
+open Paket.IntegrationTests.TestHelpers
+#else
+module Paket.IntegrationTests.UpdatePackageSpecs
+#endif
 open Fake
 open System
 open NUnit.Framework
@@ -10,39 +20,6 @@ open System.Diagnostics
 open Paket
 open Paket.Domain
 open Paket.Requirements
-
-[<Test>]
-let ``#1018 update package in main group``() =
-    paket "update nuget Newtonsoft.json" "i001018-legacy-groups-update" |> ignore
-    let lockFile = LockFile.LoadFrom(Path.Combine(scenarioTempPath "i001018-legacy-groups-update","paket.lock"))
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldBeGreaterThan (SemVer.Parse "6.0.3")
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "NUnit"].Version
-    |> shouldEqual (SemVer.Parse "2.6.1")
-    lockFile.Groups.[GroupName "Legacy"].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldEqual (SemVer.Parse "5.0.2")
-
-[<Test>]
-let ``#1018 update package in explicit main group``() =
-    paket "update nuget Newtonsoft.json group Main" "i001018-legacy-groups-update" |> ignore
-    let lockFile = LockFile.LoadFrom(Path.Combine(scenarioTempPath "i001018-legacy-groups-update","paket.lock"))
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldBeGreaterThan (SemVer.Parse "6.0.3")
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "NUnit"].Version
-    |> shouldEqual (SemVer.Parse "2.6.1")
-    lockFile.Groups.[GroupName "Legacy"].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldEqual (SemVer.Parse "5.0.2")
-
-[<Test>]
-let ``#1018 update package in group``() =
-    paket "update nuget Newtonsoft.json group leGacy" "i001018-legacy-groups-update" |> ignore
-    let lockFile = LockFile.LoadFrom(Path.Combine(scenarioTempPath "i001018-legacy-groups-update","paket.lock"))
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldEqual (SemVer.Parse "6.0.3")
-    lockFile.Groups.[Constants.MainDependencyGroup].Resolution.[PackageName "NUnit"].Version
-    |> shouldEqual (SemVer.Parse "2.6.1")
-    lockFile.Groups.[GroupName "Legacy"].Resolution.[PackageName "Newtonsoft.Json"].Version
-    |> shouldBeGreaterThan (SemVer.Parse "5.0.2")
 
 [<Test>]
 let ``#1178 update specific package``() =
@@ -144,7 +121,7 @@ let ``#1579 update allows unpinned``() =
 
     prepare scenario
     directPaket "pack templatefile paket.A.template version 1.0.0-prerelease output bin" scenario |> ignore
-    directPaket "update" scenario|> ignore
+    directPaket "update -v" scenario|> ignore
 
 [<Test>]
 let ``#1501 download succeeds``() =
@@ -166,3 +143,13 @@ let ``#1635 should tell about auth issue``() =
         failwith "error expected"
     with
     | exn when exn.Message.Contains("Could not find versions for package Argu") -> ()
+
+
+#if INTERACTIVE
+;;
+let scenario = "i001579-unlisted"
+
+prepare scenario
+directPaket "pack templatefile paket.A.template version 1.0.0-prerelease output bin" scenario
+directPaket "update -v" scenario
+#endif
