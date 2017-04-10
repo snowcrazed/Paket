@@ -29,7 +29,11 @@ let processWithValidation silent validateF commandF (result : ParseResults<'T>) 
         traceError "Command was:"
         traceError ("  " + String.Join(" ",Environment.GetCommandLineArgs()))
         result.Parser.PrintUsage() |> traceError
+#if NETCOREAPP1_0
+        // Environment.ExitCode not supported in netcoreapp1.0
+#else
         Environment.ExitCode <- 1
+#endif
     else
         commandF result
         let elapsedTime = Utils.TimeSpanToReadableString stopWatch.Elapsed
@@ -94,12 +98,12 @@ let autoRestore (results : ParseResults<_>) =
     | On -> Dependencies.Locate().TurnOnAutoRestore()
     | Off -> Dependencies.Locate().TurnOffAutoRestore()
 
-let convert (results : ParseResults<_>) =
+let convert (fromBootstrapper:bool) (results : ParseResults<_>) =
     let force = results.Contains <@ ConvertFromNugetArgs.Force @>
     let noInstall = results.Contains <@ ConvertFromNugetArgs.No_Install @>
     let noAutoRestore = results.Contains <@ ConvertFromNugetArgs.No_Auto_Restore @>
     let credsMigrationMode = results.TryGetResult <@ ConvertFromNugetArgs.Creds_Migration @>
-    Dependencies.ConvertFromNuget(force, noInstall |> not, noAutoRestore |> not, credsMigrationMode)
+    Dependencies.ConvertFromNuget(force, noInstall |> not, noAutoRestore |> not, credsMigrationMode, fromBootstrapper=fromBootstrapper)
 
 let findRefs (results : ParseResults<_>) =
     let packages = results.GetResult <@ FindRefsArgs.Packages @>
@@ -107,9 +111,9 @@ let findRefs (results : ParseResults<_>) =
     packages |> List.map (fun p -> group,p)
     |> Dependencies.Locate().ShowReferencesFor
 
-let init (results : ParseResults<InitArgs>) =
+let init (fromBootstrapper:bool) (results : ParseResults<InitArgs>) =
     Dependencies.Init()
-    Dependencies.Locate().DownloadLatestBootstrapper()
+    Dependencies.Locate().DownloadLatestBootstrapper(fromBootstrapper)
 
 let clearCache (results : ParseResults<ClearCacheArgs>) =
     Dependencies.ClearCache()
@@ -201,7 +205,7 @@ let pack (results : ParseResults<_>) =
                       ?releaseNotes = results.TryGetResult <@ PackArgs.ReleaseNotes @>,
                       ?templateFile = results.TryGetResult <@ PackArgs.TemplateFile @>,
                       excludedTemplates = results.GetResults <@ PackArgs.ExcludedTemplate @>,
-                      workingDir = Environment.CurrentDirectory,
+                      workingDir = System.IO.Directory.GetCurrentDirectory(),
                       lockDependencies = results.Contains <@ PackArgs.LockDependencies @>,
                       minimumFromLockFile = results.Contains <@ PackArgs.LockDependenciesToMinimum @>,
                       pinProjectReferences = results.Contains <@ PackArgs.PinProjectReferences @>,
@@ -294,7 +298,8 @@ let generateIncludeScripts (results : ParseResults<GenerateIncludeScriptsArgs>) 
     let frameworksForDependencyGroups = lazy (
         dependencies.Groups
             |> Seq.map (fun f -> f.Value.Options.Settings.FrameworkRestrictions)
-            |> Seq.map(function
+            |> Seq.map(fun restrictions ->
+                match restrictions with
                 | Paket.Requirements.AutoDetectFramework -> failwithf "couldn't detect framework"
                 | Paket.Requirements.FrameworkRestrictionList list ->
                   list |> Seq.collect (
@@ -311,11 +316,17 @@ let generateIncludeScripts (results : ParseResults<GenerateIncludeScriptsArgs>) 
     let environmentFramework = lazy (
         // HACK: resolve .net version based on environment
         // list of match is incomplete / inaccurate
+#if NETCOREAPP1_0
+        // Environment.Version is not supported
+        //dunno what is used for, using a default
+        DotNetFramework (FrameworkVersion.V4_5)
+#else        
         let version = Environment.Version
         match version.Major, version.Minor, version.Build, version.Revision with
         | 4, 0, 30319, 42000 -> DotNetFramework (FrameworkVersion.V4_6)
         | 4, 0, 30319, _ -> DotNetFramework (FrameworkVersion.V4_5)
         | _ -> DotNetFramework (FrameworkVersion.V4_5) // paket.exe is compiled for framework 4.5
+#endif        
     )
     let tupleMap f v = (v, f v)
     let failOnMismatch toParse parsed f message =
@@ -353,13 +364,28 @@ let generateIncludeScripts (results : ParseResults<GenerateIncludeScriptsArgs>) 
         for scriptType in scriptTypesToGenerate do
             Paket.LoadingScripts.ScriptGeneration.generateScriptsForRootFolder scriptType framework rootFolder
 
+let why (results: ParseResults<WhyArgs>) =
+    let packageName = results.GetResult <@ WhyArgs.NuGet @> |> Domain.PackageName
+    let groupName = 
+        defaultArg 
+            (results.TryGetResult <@ WhyArgs.Group @> |> Option.map Domain.GroupName) 
+            Constants.MainDependencyGroup
+    let dependencies = Dependencies.Locate()
+    let lockFile = dependencies.GetLockFile()
+    let directDeps = 
+        dependencies
+            .GetDependenciesFile()
+            .GetDependenciesInGroup(groupName)
+            |> Seq.map (fun pair -> pair.Key)
+            |> Set.ofSeq
+    let options = 
+        { Why.WhyOptions.Details = results.Contains <@ WhyArgs.Details @> }
+
+    Why.ohWhy(packageName, directDeps, lockFile, groupName, results.Parser.PrintUsage(), options)
 
 let main() =
     use consoleTrace = Logging.event.Publish |> Observable.subscribe Logging.traceToConsole
-    let paketVersion =
-        let assembly = Assembly.GetExecutingAssembly()
-        let fvi = FileVersionInfo.GetVersionInfo(assembly.Location)
-        fvi.FileVersion
+    let paketVersion = AssemblyVersionInformation.AssemblyInformationalVersion
 
     try
         let parser = ArgumentParser.Create<Command>(programName = "paket",
@@ -374,6 +400,8 @@ let main() =
         if results.Contains <@ Verbose @> then
             Logging.verbose <- true
 
+        let fromBootstrapper = results.Contains <@ From_Bootstrapper @>
+
         let version = results.Contains <@ Version @> 
         if not version then            
 
@@ -386,9 +414,9 @@ let main() =
             | Add r -> processCommand silent add r
             | ClearCache r -> processCommand silent clearCache r
             | Config r -> processWithValidation silent validateConfig config r
-            | ConvertFromNuget r -> processCommand silent convert r
+            | ConvertFromNuget r -> processCommand silent (convert fromBootstrapper) r
             | FindRefs r -> processCommand silent findRefs r
-            | Init r -> processCommand silent init r
+            | Init r -> processCommand silent (init fromBootstrapper) r
             | AutoRestore r -> processWithValidation silent validateAutoRestore autoRestore r
             | Install r -> processCommand silent install r
             | Outdated r -> processCommand silent outdated r
@@ -402,7 +430,8 @@ let main() =
             | ShowGroups r -> processCommand silent showGroups r
             | Pack r -> processCommand silent pack r
             | Push r -> processCommand silent push r
-            | GenerateIncludeScripts r -> processCommand silent generateIncludeScripts r            
+            | GenerateIncludeScripts r -> processCommand silent generateIncludeScripts r
+            | Why r -> processCommand silent why r
             // global options; list here in order to maintain compiler warnings
             // in case of new subcommands added
             | Verbose
@@ -412,7 +441,11 @@ let main() =
 
     with
     | exn when not (exn :? System.NullReferenceException) ->
+#if NETCOREAPP1_0    
+        // Environment.ExitCode not supported
+#else
         Environment.ExitCode <- 1
+#endif
         traceErrorfn "Paket failed with:%s\t%s" Environment.NewLine exn.Message
 
         if verbose then

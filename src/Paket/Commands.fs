@@ -311,12 +311,25 @@ with
         | Framework _ -> "Framework identifier to generate scripts for, such as net4 or netcore."
         | ScriptType _ -> "Language to generate scripts for, must be one of 'fsx' or 'csx'."
   
+type WhyArgs =
+    | [<CustomCommandLine("nuget")>][<Mandatory>] NuGet of package_id:string
+    | [<CustomCommandLine("group")>] Group of name:string
+    | Details
+with
+  interface IArgParserTemplate with
+      member this.Usage = 
+        match this with
+        | NuGet _ -> "Name of the NuGet package."
+        | Group _ -> "Allows to specify the dependency group."
+        | Details -> "Display detailed info with all possible paths, versions and framework constraints."
+
 type Command =
     // global options
     | [<AltCommandLine("-v"); Inherit>]                 Verbose
     | [<Inherit>]                                       Log_File of path:string
     | [<AltCommandLine("-s"); Inherit>]                 Silent
     | [<Inherit>]                                       Version
+    | [<Inherit;Hidden>]                                From_Bootstrapper
     // subcommands
     | [<CustomCommandLine("add")>]                      Add of ParseResults<AddArgs>
     | [<CustomCommandLine("clear-cache")>]              ClearCache of ParseResults<ClearCacheArgs>
@@ -338,6 +351,7 @@ type Command =
     | [<CustomCommandLine("pack")>]                     Pack of ParseResults<PackArgs>
     | [<CustomCommandLine("push")>]                     Push of ParseResults<PushArgs>
     | [<CustomCommandLine("generate-include-scripts")>] GenerateIncludeScripts of ParseResults<GenerateIncludeScriptsArgs>
+    | [<CustomCommandLine("why")>]                      Why of ParseResults<WhyArgs>
 with
     interface IArgParserTemplate with
         member this.Usage =
@@ -362,10 +376,12 @@ with
             | Pack _ -> "Packs all paket.template files within this repository."
             | Push _ -> "Pushes the given `.nupkg` file."
             | GenerateIncludeScripts _ -> "Allows to generate C# and F# include scripts which references installed packages in a interactive environment like F# Interactive oder ScriptCS."
+            | Why _ -> "Prints user-friendly reason for referencing a specified package"
             | Log_File _ -> "Specify a log file for the paket process."
             | Silent -> "Suppress console output for the paket process."
             | Verbose -> "Enable verbose console output for the paket process." 
             | Version -> "Display the version." 
+            | From_Bootstrapper -> "Call comming from the '--run' feature of the bootstrapper." 
 
 let commandParser = ArgumentParser.Create<Command>(programName = "paket", errorHandler = new ProcessExiter())
 

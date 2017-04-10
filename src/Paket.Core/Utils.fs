@@ -17,6 +17,11 @@ open Paket.Domain
 open System.Net.Http
 #endif
 
+
+/// Adds quotes around the string
+/// [omit]
+let quote (str:string) = "\"" + str.Replace("\"","\\\"") + "\""
+
 let acceptXml = "application/atom+xml,application/xml"
 let acceptJson = "application/atom+json,application/json"
 
@@ -474,7 +479,8 @@ type System.Net.WebClient with
             System.String.Format
                 (System.Globalization.CultureInfo.InvariantCulture, fileTemplate, boundary, "package", "package", "application/octet-stream") 
             |> Encoding.UTF8.GetBytes
-        let newlineBytes = Environment.NewLine |> Encoding.UTF8.GetBytes
+        // we use a windows-style newline rather than Environment.NewLine for compatibility
+        let newlineBytes = "\r\n" |> Encoding.UTF8.GetBytes
         let trailerbytes = String.Format(System.Globalization.CultureInfo.InvariantCulture, "--{0}--", boundary) |> Encoding.UTF8.GetBytes
         x.Headers.Add(HttpRequestHeader.ContentType, "multipart/form-data; boundary=" + boundary)
         use stream = x.OpenWrite(url, "PUT")

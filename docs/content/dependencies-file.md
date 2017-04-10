@@ -1,6 +1,6 @@
 # The paket.dependencies file
 
-The `paket.dependencies` file is used to specify rules regarding your application's dependencies.
+The `paket.dependencies` file is used to specify rules regarding your application's dependencies. It contains top level dependencies from all projects in the solution, while [`paket.references` file](references-files.html) specifies dependencies only for particular project.
 
 To give you an overview, consider the following `paket.dependencies` file:
 
@@ -46,6 +46,29 @@ Paket supports the following source types:
 * [HTTP](http-dependencies.html) (any single file from any site without version control)
 
 ## Global options
+
+### Required Paket version
+
+It is possible to require a specific Paket version for a [`paket.dependencies` file](dependencies-file.html).
+This can be achieved by a line which starts with `version` followed by a requested `paket.exe` version and optionally [bootstrapper command line](bootstrapper.html) arguments:
+
+```paket
+version 3.24.1
+
+source https://api.nuget.org/v3/index.json
+nuget FAKE
+nuget FSharp.Core ~> 4
+```
+
+or 
+
+```paket
+version 3.24.1 --prefer-nuget
+
+source https://api.nuget.org/v3/index.json
+nuget FAKE
+nuget FSharp.Core ~> 4
+```
 
 ### Strict references
 

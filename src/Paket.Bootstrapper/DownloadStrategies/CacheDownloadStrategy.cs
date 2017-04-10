@@ -6,19 +6,17 @@ using Paket.Bootstrapper.HelperProxies;
 
 namespace Paket.Bootstrapper.DownloadStrategies
 {
-    internal class CacheDownloadStrategy : IHaveEffectiveStrategy
+    internal class CacheDownloadStrategy : DownloadStrategy, IHaveEffectiveStrategy
     {
-        public string Name { get { return String.Format("{0} - cached", EffectiveStrategy.Name); } }
-        public IDownloadStrategy FallbackStrategy { get; set; }
+        public override string Name { get { return String.Format("{0} - cached", EffectiveStrategy.Name); } }
 
         private readonly string _paketCacheDir =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NuGet", "Cache", "Paket");
 
         public IDownloadStrategy EffectiveStrategy { get; set; }
-        public IDirectoryProxy DirectoryProxy { get; set; }
-        public IFileProxy FileProxy { get; set; }
+        public IFileSystemProxy FileSystemProxy { get; set; }
 
-        public CacheDownloadStrategy(IDownloadStrategy effectiveStrategy, IDirectoryProxy directoryProxy, IFileProxy fileProxy)
+        public CacheDownloadStrategy(IDownloadStrategy effectiveStrategy, IFileSystemProxy fileSystemProxy)
         {
             if (effectiveStrategy == null)
                 throw new ArgumentException("CacheDownloadStrategy needs a non-null effective strategy");
@@ -26,12 +24,11 @@ namespace Paket.Bootstrapper.DownloadStrategies
                 throw new ArgumentException("CacheDownloadStrategy should not have a fallback strategy");
 
             EffectiveStrategy = effectiveStrategy;
-            DirectoryProxy = directoryProxy;
-            FileProxy = fileProxy;
+            FileSystemProxy = fileSystemProxy;
         }
 
 
-        public string GetLatestVersion(bool ignorePrerelease)
+        protected override string GetLatestVersionCore(bool ignorePrerelease)
         {
             try
             {
@@ -43,7 +40,7 @@ namespace Paket.Bootstrapper.DownloadStrategies
                 {
                     var latestVersion = GetLatestVersionInCache(ignorePrerelease);
 
-                    ConsoleImpl.WriteDebug("Unable to look up the latest version online, the cache contains version {0}.", latestVersion);
+                    ConsoleImpl.WriteInfo("Unable to look up the latest version online, the cache contains version {0}.", latestVersion);
 
                     return latestVersion;
                 }
@@ -51,37 +48,39 @@ namespace Paket.Bootstrapper.DownloadStrategies
             }
         }
 
-        public void DownloadVersion(string latestVersion, string target)
+        protected override void DownloadVersionCore(string latestVersion, string target)
         {
             var cached = Path.Combine(_paketCacheDir, latestVersion, "paket.exe");
 
-            if (!FileProxy.Exists(cached))
+            if (!FileSystemProxy.FileExists(cached))
             {
-                ConsoleImpl.WriteDebug("Version {0} not found in cache.", latestVersion);
+                ConsoleImpl.WriteInfo("Version {0} not found in cache.", latestVersion);
 
                 EffectiveStrategy.DownloadVersion(latestVersion, target);
-                DirectoryProxy.CreateDirectory(Path.GetDirectoryName(cached));
-                FileProxy.Copy(target, cached);
+
+                ConsoleImpl.WriteTrace("Caching version {0} for later", latestVersion);
+                FileSystemProxy.CreateDirectory(Path.GetDirectoryName(cached));
+                FileSystemProxy.CopyFile(target, cached);
             }
             else
             {
-                ConsoleImpl.WriteDebug("Copying version {0} from cache.", latestVersion);
-
-                FileProxy.Copy(cached, target, true);
+                ConsoleImpl.WriteInfo("Copying version {0} from cache.", latestVersion);
+                ConsoleImpl.WriteTrace("{0} -> {1}", cached, target);
+                FileSystemProxy.CopyFile(cached, target, true);
             }
         }
 
-        public void SelfUpdate(string latestVersion)
+        protected override void SelfUpdateCore(string latestVersion)
         {
             EffectiveStrategy.SelfUpdate(latestVersion);
         }
 
         private string GetLatestVersionInCache(bool ignorePrerelease)
         {
-            DirectoryProxy.CreateDirectory(_paketCacheDir);
+            FileSystemProxy.CreateDirectory(_paketCacheDir);
             var zero = new SemVer();
 
-            return DirectoryProxy.GetDirectories(_paketCacheDir)
+            return FileSystemProxy.GetDirectories(_paketCacheDir)
                 .Select(Path.GetFileName)
                 .OrderByDescending(x =>
                 {

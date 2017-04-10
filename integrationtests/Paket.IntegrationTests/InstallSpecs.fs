@@ -49,25 +49,6 @@ let ``#1487 install props stays stable``() =
     s2 |> shouldEqual s1
 
 [<Test>]
-let ``#1233 install props``() = 
-    let newLockFile = install "i001233-props-files"
-    let newFile = Path.Combine(scenarioTempPath "i001233-props-files","MyClassLibrary","MyClassLibrary","MyClassLibrary.csproj")
-    let oldFile = Path.Combine(originalScenarioPath "i001233-props-files","MyClassLibrary","MyClassLibrary","MyClassLibrary.csprojtemplate")
-    let s1 = File.ReadAllText oldFile |> normalizeLineEndings
-    let s2 = File.ReadAllText newFile |> normalizeLineEndings
-    s2 |> shouldEqual s1
-
-
-[<Test>]
-let ``#1233 install props with framework restrictions``() = 
-    let newLockFile = install "i001233-props-fw-files"
-    let newFile = Path.Combine(scenarioTempPath "i001233-props-fw-files","xUnitTests","xUnitTests.csproj")
-    let oldFile = Path.Combine(originalScenarioPath "i001233-props-fw-files","xUnitTests","xUnitTests.expected.csprojtemplate")
-    let s1 = File.ReadAllText oldFile |> normalizeLineEndings
-    let s2 = File.ReadAllText newFile |> normalizeLineEndings
-    s2 |> shouldEqual s1
-
-[<Test>]
 let ``#1585 install props with for websharper``() = 
     let newLockFile = install "i001585-websharper-props"
     let newFile = Path.Combine(scenarioTempPath "i001585-websharper-props","xUnitTests","xUnitTests.csproj")
@@ -375,55 +356,6 @@ let ``#1507 allows to download remote dependencies``() =
     File.Exists (Path.Combine(scenarioTempPath scenario, "paket-files", "forki", "PrivateEye", "bin", "PrivateEye.Bridge.dll")) |> shouldEqual true
 
 [<Test>]
-let ``#1552 install mvvmlightlibs again``() =
-    let scenarioName = "i001552-install-mvvmlightlibs-again"
-    let scenarioPath = scenarioTempPath scenarioName
-
-    let expected = File.ReadAllText (Path.Combine(originalScenarioPath scenarioName,"paket.locktemplate")) |> normalizeLineEndings
-
-    let oldProjectFile = Path.Combine(originalScenarioPath scenarioName,"CSharp","CSharp.csprojtemplate")
-    let oldProjectFileText = File.ReadAllText oldProjectFile |> normalizeLineEndings
-
-    let newLockFilePath = Path.Combine(scenarioPath,"paket.lock")
-    let lockFileShouldBeConsistentAfterCommand command =
-        directPaketInPath command scenarioPath |> ignore
-
-        File.ReadAllText newLockFilePath |> normalizeLineEndings |> shouldEqual expected
-
-        let newProjectFile = Path.Combine(scenarioPath,"CSharp","CSharp.csproj")
-        File.ReadAllText newProjectFile
-        |> normalizeLineEndings |> shouldEqual oldProjectFileText
-
-    prepare scenarioName
-    let commands =
-        ["install -f"
-         "update -f"
-         "install"
-         "update"]
-    let rnd = new Random((int)DateTime.Now.Ticks)
-    for x in [1..10] do
-        let ind = if x<=4 then x-1 else rnd.Next(commands.Length)
-        let command = commands.[ind]
-        lockFileShouldBeConsistentAfterCommand command
-
-[<Test>]
-let ``#1552 install mvvmlightlibs first time``() =
-    let scenarioName = "i001552-install-mvvmlightlibs-first-time"
-
-    let expected = File.ReadAllText (Path.Combine(originalScenarioPath scenarioName,"paket.locktemplate")) |> normalizeLineEndings
-
-    install scenarioName |> ignore
-    
-    let newLockFilePath = Path.Combine(scenarioTempPath scenarioName,"paket.lock")
-    File.ReadAllText newLockFilePath |> normalizeLineEndings |> shouldEqual expected
-
-    directPaketInPath "install" (scenarioTempPath scenarioName) |> ignore
-    File.ReadAllText newLockFilePath |> normalizeLineEndings |> shouldEqual expected
-
-    directPaketInPath "install -f" (scenarioTempPath scenarioName) |> ignore
-    File.ReadAllText newLockFilePath |> normalizeLineEndings |> shouldEqual expected
-
-[<Test>]
 [<Ignore("very slow test")>]
 let ``#1589 http dep restore in parallel``() =
     let scenarioName = "i001589-http-dep-restore-in-parallel"
@@ -532,52 +464,6 @@ let ``#1883 install FSharp.Core from Chessie``() =
 let ``#1883 should not install .NET Standard``() = 
     let newLockFile = install "i001883-machine"
     newLockFile.Groups.[GroupName "main"].Resolution.ContainsKey (PackageName "System.Reflection") |> shouldEqual false
-    
-[<Test>]
-let ``#1815 duplicate fsharp core reference when using netstandard1.6``() =
-    let lockFile = install "i001815-multiple-dnc-refs"
-    let newFile = Path.Combine(scenarioTempPath "i001815-multiple-dnc-refs","OtherProject","testproject.csproj")
-    let oldFile = Path.Combine(originalScenarioPath "i001815-multiple-dnc-refs","OtherProject","testproject.csprojtemplate")
-    let s1 = File.ReadAllText oldFile |> normalizeLineEndings
-    let s2 = File.ReadAllText newFile |> normalizeLineEndings
-    
-    let paketDependencies = Paket.Dependencies(scenarioTempPath "i001815-multiple-dnc-refs" @@ "paket.dependencies")
-    let group = None
-    let groupStr = "Main"
-    let groupName = Paket.Domain.GroupName (groupStr)
-    let framework = Paket.FrameworkIdentifier.DotNetStandard (Paket.DotNetStandardVersion.V1_6)
-    let lockFilePath = Paket.DependenciesFile.FindLockfile paketDependencies.DependenciesFile
-
-    // Restore
-    paketDependencies.Restore(false, group, [], false, true)
-    |> ignore
-    let lockFile = paketDependencies.GetLockFile()
-    let lockGroup = lockFile.GetGroup groupName
-
-    let allPackages = 
-      lockGroup.Resolution
-      |> Seq.map (fun kv -> 
-        let packageName = kv.Key
-        let package = kv.Value
-        package)
-      |> Seq.toList
-
-    let orderedPackages = LoadingScripts.PackageAndAssemblyResolution.getPackageOrderResolvedPackage allPackages
-
-    // Retrieve assemblies
-    let assemblies =
-      orderedPackages
-      |> Seq.collect (fun p ->
-        let installModel =
-          paketDependencies.GetInstalledPackageModel(group, p.Name.ToString())
-            .ApplyFrameworkRestrictions(Requirements.getRestrictionList p.Settings.FrameworkRestrictions)
-        Paket.LoadingScripts.PackageAndAssemblyResolution.getDllsWithinPackage framework installModel)
-      |> Seq.map (fun fi -> fi.FullName)
-      |> Seq.filter (fun fi -> fi.EndsWith ("FSharp.Core.dll"))
-      |> Seq.toList
-
-    assemblies |> shouldEqual [ scenarioTempPath "i001815-multiple-dnc-refs" @@ "packages" @@ "Microsoft.FSharp.Core.netcore" @@ "lib" @@ "netstandard1.6" @@ "FSharp.Core.dll" ]
-    s2 |> shouldEqual s1
 
 [<Test>]
 let ``#1860 faulty condition was generated`` () =

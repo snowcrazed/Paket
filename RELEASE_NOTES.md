@@ -1,7 +1,53 @@
-#### 3.23.2 - 11.10.2016
-* USABILITY: Specify Chessie version - https://github.com/fsprojects/Paket/issues/1958
+#### 3.31.2 - 12.12.2016
+* BUGFIX: NuGetV2-OData: retrieve versions in descending order for artifactory - https://github.com/fsprojects/Paket/pull/2073
 
-#### 3.23.1 - 10.10.2016
+#### 3.31.1 - 07.12.2016
+* BUGFIX: Default address of NuGet v3 stream points to https - https://github.com/fsprojects/Paket/pull/2071
+ 
+#### 3.31.0 - 04.12.2016
+* Added monoandroid70 moniker (Android 7 Nougat) - https://github.com/fsprojects/Paket/pull/2065
+* BUGFIX: Package names are compared using non-linguistic Ordinal comparison - https://github.com/fsprojects/Paket/pull/2067
+* BUGFIX: Fixed Git dependency change detection - https://github.com/fsprojects/Paket/pull/2061
+* BUGFIX: Relax prerelease condition for --keep-patch - https://github.com/fsprojects/Paket/issues/2048
+* BUGFIX: Allow specify auto-detect in specific groups - https://github.com/fsprojects/Paket/issues/2011
+
+#### 3.30.0 - 22.11.2016
+* Allow override of NuGetCacheFolder location through environment variable - https://github.com/fsprojects/Paket/pull/2035
+* BUGFIX: Add authorization headers to Paket Push - https://github.com/fsprojects/Paket/pull/2034
+* BUGFIX: Fix package name displayed when package is found in different group - https://github.com/fsprojects/Paket/issues/2031
+* BUGFIX: Report which nuspec file is invalid when the nuspec cannot be loaded - https://github.com/fsprojects/Paket/issues/2026
+
+#### 3.29.0 - 18.11.2016
+* BUGFIX: Paket adds stricter prerelease dependencies to make NuGet happy - https://github.com/fsprojects/Paket/issues/2024
+
+#### 3.28.0 - 17.11.2016
+* BUGFIX: Optimize deps to make #2020 work - https://github.com/fsprojects/Paket/pull/2020
+* BUGFIX: Added missing tolower() - https://github.com/fsprojects/Paket/pull/2023
+* BUGFIX: Fix broken condition in WhenNode - https://github.com/fsprojects/Paket/pull/2022
+* REVERT: NuGetV2-OData: retrieve versions in descending order - https://github.com/fsprojects/Paket/pull/2008
+* BUGFIX: Git Dependency failed to install when space exists in User Folder name - https://github.com/fsprojects/Paket/pull/2015
+
+#### 3.27.0 - 09.11.2016
+* Verbose bootstrapper - https://github.com/fsprojects/Paket/pull/2007 
+* BUGFIX: NuGetV2-OData: retrieve versions in descending order - https://github.com/fsprojects/Paket/pull/2008
+* BUGFIX: Paket doesn't reference libs for UWP apps - https://github.com/fsprojects/Paket/issues/2001
+* BUGFIX: Version constraint was missing on referenced projects packed separately - https://github.com/fsprojects/Paket/issues/1976
+* BUGFIX: Make download loop to terminate in max N=5 iterations - https://github.com/fsprojects/Paket/pull/1999
+
+#### 3.26.0 - 31.10.2016
+* New Command: paket why - http://theimowski.com/blog/2016/10-30-paket-why-command/index.html
+* BUGFIX: Do not remove main group - https://github.com/fsprojects/Paket/issues/1950
+* BUGFIX: Fix out-of-date-check
+* BUGFIX: Be more conservative during paket add and paket remove - https://github.com/fsprojects/Paket/issues/1652
+
+#### 3.25.0 - 28.10.2016
+* Allow to put required paket version into the paket.dependencies file - https://github.com/fsprojects/Paket/pull/1983
+* BUGFIX: Custom print for NugetSourceAuthentication types - https://github.com/fsprojects/Paket/pull/1985
+* BUGFIX: DependenciesFileParser now tracks inner exceptions for package sources - https://github.com/fsprojects/Paket/pull/1987
+
+#### 3.24.1 - 25.10.2016
+* USABILITY: New magic mode bootstrapper - https://github.com/fsprojects/Paket/pull/1961
+* USABILITY: Specify Chessie version - https://github.com/fsprojects/Paket/issues/1958
 * REVERT: Support long paths for NTFS - https://github.com/fsprojects/Paket/pull/1944
 
 #### 3.23.0 - 10.10.2016

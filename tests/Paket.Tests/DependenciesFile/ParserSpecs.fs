@@ -64,6 +64,16 @@ let ``should read simple config with prerelease and comment``() =
     packageDefinition.Range |> shouldEqual (VersionRange.AtLeast("3.2"))
     packageDefinition.PreReleases |> shouldEqual (PreReleaseStatus.All)
 
+let configWithVersionLine = """
+version 1.2.3 --prefer-nuget
+source "http://www.nuget.org/api/v2"
+nuget Castle.Windsor-log4net
+"""
+
+[<Test>]
+let ``should read simple config with version line for bootstrapper``() = 
+    DependenciesFile.FromCode(configWithVersionLine) |> ignore
+
 
 let config2 = """
 source "http://www.nuget.org/api/v2"
@@ -1374,3 +1384,52 @@ let ``async cache should work``() =
     } |> Async.RunSynchronously
     !x |> shouldEqual 1
 
+let autodetectconfig = """
+framework: auto-detect
+source https://api.nuget.org/v3/index.json
+nuget nlog
+
+group build
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget GitVersion
+
+group tests
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget xunit
+"""
+
+[<Test>]
+let ``should read autodetect from main group``() = 
+    let cfg = DependenciesFile.FromCode(autodetectconfig)
+    cfg.Groups.[Constants.MainDependencyGroup].Options.Settings.FrameworkRestrictions 
+    |> shouldEqual FrameworkRestrictions.AutoDetectFramework
+
+let autodetectconfigSpecific = """
+//`auto-detect` with explicit 'Main' group fails
+group Main
+framework: auto-detect
+source https://api.nuget.org/v3/index.json
+nuget nlog
+
+group build
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget GitVersion
+
+group tests
+framework: net4.5.2
+source https://www.nuget.org/api/v2
+
+nuget xunit
+"""
+
+[<Test>]
+let ``should read autodetect from specific main group``() = 
+    let cfg = DependenciesFile.FromCode(autodetectconfigSpecific)
+    cfg.Groups.[Constants.MainDependencyGroup].Options.Settings.FrameworkRestrictions 
+    |> shouldEqual FrameworkRestrictions.AutoDetectFramework

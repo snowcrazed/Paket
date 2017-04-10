@@ -3,6 +3,7 @@
 // --------------------------------------------------------------------------------------
 
 #r @"packages/build/FAKE/tools/FakeLib.dll"
+#r "System.IO.Compression.FileSystem"
 
 open Fake
 open Fake.Git
@@ -60,6 +61,12 @@ let gitName = "Paket"
 // The url for the raw files hosted
 let gitRaw = environVarOrDefault "gitRaw" "https://raw.github.com/fsprojects"
 
+let dotnetcliVersion = "1.0.0-preview3-004056"
+
+let dotnetCliPath = DirectoryInfo "./dotnetcore"
+
+let netcoreFiles = !! "src/**.preview?/*.fsproj" |> Seq.toList
+
 // --------------------------------------------------------------------------------------
 // END TODO: The rest of the file includes standard build steps
 // --------------------------------------------------------------------------------------
@@ -111,10 +118,48 @@ let genCSAssemblyInfo (projectPath) =
 
 // Generate assembly info files with the right version & up-to-date information
 Target "AssemblyInfo" (fun _ ->
-    let fsProjs =  !! "src/**/*.fsproj"
-    let csProjs = !! "src/**/*.csproj"
+    let fsProjs =  !! "src/**/*.fsproj" |> Seq.filter (fun s -> not <| s.Contains("preview"))
+    let csProjs = !! "src/**/*.csproj" |> Seq.filter (fun s -> not <| s.Contains("preview"))
     fsProjs |> Seq.iter genFSAssemblyInfo
     csProjs |> Seq.iter genCSAssemblyInfo
+)
+
+let dotnetExePath = if isWindows then "dotnetcore/dotnet.exe" else "dotnetcore/dotnet" |> FullName
+
+Target "InstallDotNetCore" (fun _ ->
+    let correctVersionInstalled = 
+        try
+            if FileInfo(Path.Combine(dotnetCliPath.FullName,"dotnet.exe")).Exists then
+                let processResult = 
+                    ExecProcessAndReturnMessages (fun info ->  
+                    info.FileName <- dotnetExePath
+                    info.WorkingDirectory <- Environment.CurrentDirectory
+                    info.Arguments <- "--version") (TimeSpan.FromMinutes 30.)
+
+                processResult.Messages |> separated "" = dotnetcliVersion
+                
+            else
+                false
+        with 
+        | _ -> false
+
+    if correctVersionInstalled then
+        tracefn "dotnetcli %s already installed" dotnetcliVersion
+    else
+        CleanDir dotnetCliPath.FullName
+        let zipFileName = sprintf "dotnet-dev-win-x64.%s.zip" dotnetcliVersion
+        let downloadPath = sprintf "https://dotnetcli.blob.core.windows.net/dotnet/Sdk/%s/%s" dotnetcliVersion zipFileName
+        let localPath = Path.Combine(dotnetCliPath.FullName, zipFileName)
+
+        tracefn "Installing '%s' to '%s" downloadPath localPath
+        
+        use webclient = new Net.WebClient()
+        webclient.DownloadFile(downloadPath, localPath)
+
+        System.IO.Compression.ZipFile.ExtractToDirectory(localPath, dotnetCliPath.FullName)
+
+    let oldPath = System.Environment.GetEnvironmentVariable("PATH")
+    System.Environment.SetEnvironmentVariable("PATH", sprintf "%s%s%s" dotnetCliPath.FullName (System.IO.Path.PathSeparator.ToString()) oldPath)
 )
 
 // --------------------------------------------------------------------------------------
@@ -128,9 +173,6 @@ Target "CleanDocs" (fun _ ->
     CleanDirs ["docs/output"]
 )
 
-#load "paket-files/build/matthid/FAKE/src/app/Fake.DotNet.Cli/Dotnet.fs"
-open Fake.DotNet.Cli
-
 // --------------------------------------------------------------------------------------
 // Build library & test project
 
@@ -140,44 +182,41 @@ Target "Build" (fun _ ->
     |> ignore
 )
 
-let dotnetExePath =
-    match tryFindFileOnPath (if isWindows then "dotnet.exe" else "dotnet") with
-    | Some p -> p
-    | None -> ""
 
 Target "DotnetRestore" (fun _ ->
-    // dotnet restore
-    !! "src/**/project.json"
-    |> Seq.iter(fun proj ->
-        // Fix version entered in project.json
-        let found = ref false
-        File.ReadLines proj
-        |> Seq.toList
-        |> List.map (fun l ->
-              if (not !found) && l.StartsWith("  \"version\": \"") && l.EndsWith("\",") then
-                found := true
-                sprintf "  \"version\": \"%s\"," release.NugetVersion
-              else l)
-        |> fun lines -> File.WriteAllLines(proj, lines)
-
-        DotnetRestore (fun c ->
+    netcoreFiles
+    |> Seq.iter (fun proj ->
+        DotNetCli.Restore (fun c ->
             { c with
-                Common = { c.Common with DotnetCliPath = dotnetExePath }
-            }) proj
+                Project = proj
+                ToolPath = dotnetExePath 
+            }) 
+    )
+)
+
+Target "DotnetBuild" (fun _ ->
+    netcoreFiles
+    |> Seq.iter (fun proj ->
+        DotNetCli.Build (fun c ->
+            { c with
+                Project = proj
+                ToolPath = dotnetExePath
+            })
     )
 )
 
 Target "DotnetPackage" (fun _ ->
-    // dotnet pack
-    !! "src/**/project.json"
-    |> Seq.iter(fun proj ->
-        DotnetPack (fun c ->
-            { c with
-                Common = { c.Common with DotnetCliPath = dotnetExePath }
-                Configuration = Release
-                OutputPath = Some (tempDir @@ "dotnetcore")
-            }) proj
-    )
+    // netcoreFiles
+    // |> Seq.iter (fun proj ->
+    //     DotNetCli.Pack (fun c ->
+    //         { c with
+    //             Project = proj
+    //             ToolPath = dotnetExePath
+    //             AdditionalArgs = ["/p:RuntimeIdentifier=win7-x64"]
+    //         })
+    // )
+
+    ()
 )
 
 
@@ -305,22 +344,33 @@ Target "SignAssemblies" (fun _ ->
 
 Target "NuGet" (fun _ ->    
     !! "integrationtests/**/paket.template" |> Seq.iter DeleteFile
+    
+    let files = !! "src/**/*.preview*" |> Seq.toList
+    for file in files do
+        File.Move(file,file + ".temp")
+
     Paket.Pack (fun p -> 
         { p with 
             ToolPath = "bin/merged/paket.exe" 
             Version = release.NugetVersion
             ReleaseNotes = toLines release.Notes })
+
+    for file in files do
+        File.Move(file + ".temp",file)
 )
 
 Target "MergeDotnetCoreIntoNuget" (fun _ ->
-    let nupkg = sprintf "./temp/Paket.Core.%s.nupkg" (release.NugetVersion) |> Path.GetFullPath
-    let netcoreNupkg = sprintf "./temp/dotnetcore/Paket.Core.%s.nupkg" (release.NugetVersion) |> Path.GetFullPath
 
-    Shell.Exec(
-      dotnetExePath, 
-      sprintf """mergenupkg --source "%s" --other "%s" --framework netstandard1.6 """ nupkg netcoreNupkg,
-      "src/Paket.Core/Paket.Core/")
-    |> fun exitCode -> if exitCode <> 0 then failwithf "mergenupkg exited with exit code %d" exitCode
+//    let nupkg = sprintf "./temp/Paket.Core.%s.nupkg" (release.NugetVersion) |> Path.GetFullPath
+//    let netcoreNupkg = sprintf "./temp/dotnetcore/Paket.Core.%s.nupkg" (release.NugetVersion) |> Path.GetFullPath
+//
+//    Shell.Exec(
+//      dotnetExePath, 
+//      sprintf """mergenupkg --source "%s" --other "%s" --framework netstandard1.6 """ nupkg netcoreNupkg,
+//      "src/Paket.Core/Paket.Core/")
+//    |> fun exitCode -> if exitCode <> 0 then failwithf "mergenupkg exited with exit code %d" exitCode
+
+    ()
 )
 
 Target "PublishChocolatey" (fun _ ->
@@ -491,8 +541,10 @@ Target "All" DoNothing
 
 "Clean"
   ==> "AssemblyInfo"
-  ==> "Build"
+  =?> ("InstallDotNetCore", not <| hasBuildParam "DISABLE_NETCORE")
   =?> ("DotnetRestore", not <| hasBuildParam "DISABLE_NETCORE")
+  =?> ("DotnetBuild", not <| hasBuildParam "DISABLE_NETCORE")
+  ==> "Build"
   =?> ("DotnetPackage", not <| hasBuildParam "DISABLE_NETCORE")
   =?> ("BuildPowerShell", not isMono)
   ==> "RunTests"
